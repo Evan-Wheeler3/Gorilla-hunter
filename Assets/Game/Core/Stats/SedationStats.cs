@@ -7,9 +7,9 @@ namespace PrimalRaid.Core
     public sealed class SedationStats
     {
         public float maxSedation = 100f;
-        public float dartSedation = 50f;      // owner: 2 darts drop a gorilla (set 100 for 1-dart drops)
-        public float decayDelaySeconds = 4f;  // owner: a dart's sedation lasts ~5 s: held 4 s after the last hit...
-        public float decayPerSecond = 50f;    // ...then drains in ~1 s. Two darts within ~4 s always drop a gorilla.
+        public float dartSedation = 100f;     // owner: one dart drops a gorilla
+        public float decayDelaySeconds = 4f;  // partial doses (future traps, weaker darts) hold 4 s...
+        public float decayPerSecond = 50f;    // ...then drain at this rate
         public float maxSlow = 0.3f;          // move speed lost at a full meter, scaled by the meter; assumption
         public float collapseSeconds = 15f;   // owner: 40/90 s too long for a 10 min round; assumption
         public float boundSeconds = 30f;      // assumption

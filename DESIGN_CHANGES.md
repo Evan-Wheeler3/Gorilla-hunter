@@ -21,8 +21,8 @@ Status: config values are in; the round loop that enforces these rules is the ne
 
 | Rule | Doc | Now | Status |
 | --- | --- | --- | --- |
-| Darts to drop a gorilla | 3 within ~5 s (math actually needed 2.5 s) | 2 within ~4 s: each dart adds 50, held 4 s, then drains in ~1 s | built and tested |
-| Sedation slow | none | up to 30% slower at a full meter | built |
+| Darts to drop a gorilla | 3 within ~5 s (math actually needed 2.5 s) | 1 dart | built and tested |
+| Sedation slow | none | partial doses slow up to 30%; unused until something deals partial doses | built |
 | Rifle reload | 5 s, manual R | 3.5 s, automatic | built |
 | Dart range | — | no practical limit (10 s flight), gravity drop | built |
 | Collapse / bound time | 40 s / 90 s | 15 s / 30 s | built (bind UI comes with dragging) |
@@ -30,6 +30,5 @@ Status: config values are in; the round loop that enforces these rules is the ne
 | Gorilla swipe | 50 dmg, two hits kill | 100 dmg, one hit kills | built |
 | Dragging | 40% speed alone, no sprint | full speed, sprint allowed | config only, drag arrives next milestone |
 
-One consequence to check in playtests: a single hunter can now drop a gorilla alone
-(dart, 3.5 s reload, dart lands inside the 4 s hold). That suits 2 v 8; if hunters get too
-strong, raise the reload or shorten `decayDelaySeconds`.
+Playtest check: with one-dart drops and one-hit kills, every fight is decided by who lands
+the first hit. If hunters dominate, lengthen the reload; if gorillas do, shorten it.

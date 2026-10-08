@@ -16,74 +16,56 @@ namespace PrimalRaid.Tests
         }
 
         void Dart() => meter.Add(stats.dartSedation);
+        float Half => stats.maxSedation * 0.5f;
 
         [Test]
-        public void OneDartDoesNotDropAGorilla()
+        public void OneDartDropsAGorilla()
         {
-            Dart();
-            Assert.That(meter.State, Is.EqualTo(SedationState.Awake));
-            Assert.That(meter.Value, Is.EqualTo(stats.dartSedation));
-        }
-
-        [Test]
-        public void OneDartHoldsThenWearsOffInAboutFiveSeconds()
-        {
-            Dart();
-            meter.Tick(stats.decayDelaySeconds);
-            Assert.That(meter.Value, Is.EqualTo(stats.dartSedation));
-            meter.Tick(0.5f);
-            Assert.That(meter.Value, Is.GreaterThan(0f).And.LessThan(stats.dartSedation));
-            meter.Tick(0.6f);
-            Assert.That(meter.Value, Is.EqualTo(0f));
-        }
-
-        [Test]
-        public void HoldAndDecaySplitCorrectlyInsideOneTick()
-        {
-            Dart();
-            meter.Tick(stats.decayDelaySeconds + 0.2f);
-            Assert.That(meter.Value, Is.EqualTo(stats.dartSedation - stats.decayPerSecond * 0.2f).Within(1e-3));
-        }
-
-        [Test]
-        public void TwoDartsBackToBackDropAGorilla()
-        {
-            Dart();
             Assert.That(meter.Add(stats.dartSedation), Is.True);
             Assert.That(meter.State, Is.EqualTo(SedationState.Collapsed));
             Assert.That(meter.RemainingDowntime, Is.EqualTo(stats.collapseSeconds));
         }
 
         [Test]
-        public void OneHunterCanDropAGorillaAcrossAReload()
+        public void PartialDoseHoldsThenWearsOff()
         {
-            // Dart, 3.5 s auto-reload, dart: the first dart is still held at full strength.
-            Dart();
-            meter.Tick(new HunterStats().rifleReloadSeconds);
-            Assert.That(meter.Add(stats.dartSedation), Is.True);
+            meter.Add(Half);
+            meter.Tick(stats.decayDelaySeconds);
+            Assert.That(meter.Value, Is.EqualTo(Half));
+            meter.Tick(0.2f);
+            Assert.That(meter.Value, Is.EqualTo(Half - stats.decayPerSecond * 0.2f).Within(1e-3));
+            meter.Tick(10f);
+            Assert.That(meter.Value, Is.EqualTo(0f));
         }
 
         [Test]
-        public void DartsMoreThanFiveSecondsApartDoNotDrop()
+        public void HoldAndDecaySplitCorrectlyInsideOneTick()
         {
-            Dart();
-            meter.Tick(5.1f);
-            Assert.That(meter.Add(stats.dartSedation), Is.False);
-            Assert.That(meter.Value, Is.EqualTo(stats.dartSedation));
+            meter.Add(Half);
+            meter.Tick(stats.decayDelaySeconds + 0.2f);
+            Assert.That(meter.Value, Is.EqualTo(Half - stats.decayPerSecond * 0.2f).Within(1e-3));
+        }
+
+        [Test]
+        public void TwoPartialDosesInsideTheHoldDrop()
+        {
+            meter.Add(Half);
+            meter.Tick(stats.decayDelaySeconds * 0.9f);
+            Assert.That(meter.Add(Half), Is.True);
         }
 
         [Test]
         public void SedationSlowsTheGorillaInProportion()
         {
             Assert.That(meter.SpeedMultiplier, Is.EqualTo(1f));
-            Dart();
+            meter.Add(Half);
             Assert.That(meter.SpeedMultiplier, Is.EqualTo(1f - stats.maxSlow * 0.5f).Within(1e-4));
         }
 
         [Test]
         public void DartsAreIgnoredWhileDown()
         {
-            meter.Add(stats.maxSedation);
+            Dart();
             Assert.That(meter.Add(stats.dartSedation), Is.False);
             Assert.That(meter.RemainingDowntime, Is.EqualTo(stats.collapseSeconds));
         }
