@@ -21,13 +21,16 @@ namespace PrimalRaid.UI
         static readonly Color HealthColor = new Color(0.4f, 0.9f, 0.4f);
 
         GorillaController gorilla;
+        GorillaController teammate;
         HunterController hunter;
         GUIStyle label;
         GUIStyle bigLabel;
 
-        public void Bind(GorillaController gorilla, HunterController hunter)
+        /// <param name="teammate">A second, uncontrolled gorilla for testing slaps (may be null).</param>
+        public void Bind(GorillaController gorilla, GorillaController teammate, HunterController hunter)
         {
             this.gorilla = gorilla;
+            this.teammate = teammate;
             this.hunter = hunter;
         }
 
@@ -78,6 +81,9 @@ namespace PrimalRaid.UI
 
             var anchor = gorilla.AnchorInRange;
             var cam = gorilla.ViewCamera;
+            if (teammate != null && teammate.Sedation.Meter.IsDown && cam != null)
+                DrawDownedLabel(cam, teammate, "swipe to slap awake");
+
             if (anchor != null && cam != null && gorilla.State != GorillaController.MoveState.Swinging)
             {
                 Vector3 screen = cam.WorldToScreenPoint(anchor.Point);
@@ -109,14 +115,27 @@ namespace PrimalRaid.UI
             GUI.Label(new Rect(x, y, 400, 24), $"Tranq rifle: {darts}", label);
             GUI.Label(new Rect(x, y + 24, 200, 24), "Health", label);
             Bar(new Rect(x + 70, y + 30, 200, 10), hunter.Health.Current / hunter.Health.Max, HealthColor);
-            GUI.Label(new Rect(x, y + 44, 200, 24), "Sprint", label);
-            Bar(new Rect(x + 70, y + 50, 200, 10), hunter.SprintNormalized, StaminaColor);
+            if (!hunter.HasUnlimitedSprint)
+            {
+                GUI.Label(new Rect(x, y + 44, 200, 24), "Sprint", label);
+                Bar(new Rect(x + 70, y + 50, 200, 10), hunter.SprintNormalized, StaminaColor);
+            }
 
             if (gorilla != null)
-                DrawSedationOverGorilla(hunter.ViewCamera);
+                DrawSedationOverGorilla(hunter.ViewCamera, gorilla);
+            if (teammate != null)
+                DrawSedationOverGorilla(hunter.ViewCamera, teammate);
         }
 
-        void DrawSedationOverGorilla(Camera cam)
+        void DrawDownedLabel(Camera cam, GorillaController target, string text)
+        {
+            Vector3 screen = cam.WorldToScreenPoint(target.transform.position + Vector3.up * 3.8f);
+            if (screen.z > 0f)
+                GUI.Label(new Rect(screen.x - 90, Screen.height - screen.y - 24, 220, 24),
+                          $"DOWN {target.Sedation.Meter.RemainingDowntime:0}s - {text}", label);
+        }
+
+        void DrawSedationOverGorilla(Camera cam, GorillaController gorilla)
         {
             var target = gorilla.Sedation;
             if (cam == null || (target.Meter.Value <= 0f && Time.time - target.LastHitTime > SedationBarShowSeconds))

@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using PrimalRaid.Core;
 using UnityEngine;
 
 namespace PrimalRaid.World
@@ -10,7 +11,8 @@ namespace PrimalRaid.World
     /// </summary>
     public static class GreyboxIslandBuilder
     {
-        public const float HalfSize = 150f;
+        public const float HalfSize = IslandLayout.HalfSize;
+        const float DockClearRadius = 28f;
 
         public struct Result
         {
@@ -21,6 +23,8 @@ namespace PrimalRaid.World
             /// <summary>Real match spawns (north canopy and south camp).</summary>
             public Vector3 gorillaNestSpawn;
             public Vector3 hunterCampSpawn;
+            /// <summary>Centre of each boat delivery zone (one per shore).</summary>
+            public Vector3[] boatZones;
         }
 
         static readonly Color Grass = new Color(0.36f, 0.62f, 0.27f);
@@ -41,7 +45,6 @@ namespace PrimalRaid.World
         {
             new Rect(-14f, -14f, 28f, 28f),     // temple
             new Rect(-99f, -150f, 18f, 300f),   // river
-            new Rect(105f, -15f, 45f, 30f),     // boat dock
             new Rect(-40f, -150f, 80f, 45f),    // hunter camp
             new Rect(-12f, -50f, 24f, 22f),     // test spawn clearing
         };
@@ -54,7 +57,9 @@ namespace PrimalRaid.World
             BuildGround(root);
             BuildLighting(root);
             BuildTemple(root);
-            BuildBoatDock(root);
+            var boatZones = new Vector3[IslandLayout.BoatDocks.Length];
+            for (int i = 0; i < boatZones.Length; i++)
+                boatZones[i] = BuildBoatDock(root, IslandLayout.BoatDocks[i]);
             BuildHunterCamp(root);
             BuildFireEdgeMarker(root);
 
@@ -74,6 +79,7 @@ namespace PrimalRaid.World
                 hunterTestSpawn = new Vector3(-2f, 0.1f, -46f),
                 gorillaNestSpawn = new Vector3(20f, 0.1f, 120f),
                 hunterCampSpawn = new Vector3(0f, 0.1f, -125f),
+                boatZones = boatZones,
             };
         }
 
@@ -148,21 +154,28 @@ namespace PrimalRaid.World
                                      new Vector3(4f, 0.5f, 1.2f), Stone);
         }
 
-        static void BuildBoatDock(Transform root)
+        /// <summary>
+        /// A boat dock: the delivery zone at the shoreline, a pier running inland, the boat out at
+        /// sea and a light beam to navigate by. Local +X points out to sea. Returns the zone centre.
+        /// </summary>
+        static Vector3 BuildBoatDock(Transform root, BoatDock spec)
         {
-            // Boat dock (east): the delivery zone, in the open, with a light beam.
             var dock = new GameObject("Boat Dock").transform;
             dock.SetParent(root, false);
-            GreyboxMaterials.Box("Pier", dock, new Vector3(140f, 0.6f, 0f), new Vector3(30f, 0.4f, 6f), Wood);
+            dock.localPosition = new Vector3(spec.x, 0f, spec.z);
+            dock.localRotation = Quaternion.Euler(0f, spec.outwardYaw, 0f);
+
+            GreyboxMaterials.Box("Pier", dock, new Vector3(-10f, 0.6f, 0f), new Vector3(30f, 0.4f, 6f), Wood);
             for (int i = 0; i < 6; i++)
-                GreyboxMaterials.Box("Post", dock, new Vector3(127f + i * 5f, 0f, 3.2f), new Vector3(0.4f, 2f, 0.4f), Wood);
-            GreyboxMaterials.Box("Boat Hull", dock, new Vector3(158f, 0f, -5f), new Vector3(16f, 2.2f, 6f), Wood);
-            GreyboxMaterials.Box("Boat Cabin", dock, new Vector3(161f, 2.1f, -5f), new Vector3(5f, 2f, 4f), Khaki);
-            var zone = GreyboxMaterials.Box("Boat Zone", dock, new Vector3(150f, 1.5f, 0f), new Vector3(10f, 3f, 10f),
+                GreyboxMaterials.Box("Post", dock, new Vector3(-23f + i * 5f, 0f, 3.2f), new Vector3(0.4f, 2f, 0.4f), Wood);
+            GreyboxMaterials.Box("Boat Hull", dock, new Vector3(8f, 0f, -5f), new Vector3(16f, 2.2f, 6f), Wood);
+            GreyboxMaterials.Box("Boat Cabin", dock, new Vector3(11f, 2.1f, -5f), new Vector3(5f, 2f, 4f), Khaki);
+            var zone = GreyboxMaterials.Box("Boat Zone", dock, new Vector3(0f, 1.5f, 0f), new Vector3(10f, 3f, 10f),
                                             Beam, collider: false);
-            zone.GetComponent<Renderer>().enabled = false; // zone volume, gameplay hooks come in week 2
-            GreyboxMaterials.Box("Boat Beam", dock, new Vector3(150f, 40f, 0f), new Vector3(1.2f, 80f, 1.2f),
+            zone.GetComponent<Renderer>().enabled = false; // zone volume, gameplay hooks come with dragging
+            GreyboxMaterials.Box("Boat Beam", dock, new Vector3(0f, 40f, 0f), new Vector3(1.2f, 80f, 1.2f),
                                  Beam, collider: false);
+            return dock.position;
         }
 
         static void BuildHunterCamp(Transform root)
@@ -278,6 +291,8 @@ namespace PrimalRaid.World
 
         static bool IsCleared(Vector2 p)
         {
+            if (IslandLayout.DistanceToNearestBoat(p.x, p.y) < DockClearRadius)
+                return true;
             foreach (var r in clearAreas)
                 if (r.Contains(p))
                     return true;

@@ -11,7 +11,7 @@ namespace PrimalRaid.DevTools
     public sealed class DebugMenu : MonoBehaviour
     {
         GreyboxBootstrap bootstrap;
-        Rect window = new Rect(20, 60, 300, 470);
+        Rect window = new Rect(20, 60, 300, 520);
 
         public bool IsOpen { get; private set; }
 
@@ -59,6 +59,9 @@ namespace PrimalRaid.DevTools
             if (GUILayout.Button("Bind")) meter.Bind();
             GUILayout.EndHorizontal();
             if (GUILayout.Button("Refill gorilla stamina")) gorilla.RefillStamina();
+            var buddy = bootstrap.Teammate.Sedation;
+            GUILayout.Label($"Teammate: {buddy.Meter.State}, down {buddy.Meter.RemainingDowntime:0.0}s");
+            if (GUILayout.Button("Knock out teammate (then swipe him)")) buddy.ApplyDart();
 
             GUILayout.Space(6);
             GUILayout.Label($"Hunter: health {hunter.Health.Current:0}, {(hunter.IsDead ? "dead" : "alive")}");

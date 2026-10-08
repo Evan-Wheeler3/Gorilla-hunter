@@ -34,6 +34,7 @@ namespace PrimalRaid.Players
         static readonly Color RopeColor = new Color(0.25f, 0.45f, 0.15f);
 
         readonly HashSet<Health> swipeVictims = new HashSet<Health>();
+        readonly HashSet<SedationTarget> slappedTeammates = new HashSet<SedationTarget>();
 
         CharacterController body;
         SedationTarget sedation;
@@ -497,9 +498,18 @@ namespace PrimalRaid.Players
             Vector3 knockback = (forward + Vector3.up * 0.35f).normalized * stats.swipeKnockback;
 
             swipeVictims.Clear();
+            slappedTeammates.Clear();
             int count = Physics.OverlapSphereNonAlloc(point, reach, overlapHits, ~0, QueryTriggerInteraction.Ignore);
             for (int i = 0; i < count; i++)
             {
+                // Swiping a downed teammate slaps it awake faster.
+                var teammate = overlapHits[i].GetComponentInParent<SedationTarget>();
+                if (teammate != null && teammate != sedation && teammate.Meter.IsDown && slappedTeammates.Add(teammate))
+                {
+                    teammate.Slap();
+                    continue;
+                }
+
                 var health = overlapHits[i].GetComponentInParent<Health>();
                 if (health == null || health.transform == transform || !swipeVictims.Add(health))
                     continue;

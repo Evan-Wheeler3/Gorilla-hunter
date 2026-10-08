@@ -37,7 +37,8 @@ namespace PrimalRaid.Players
         int loadedDarts;
         float reloadTimer;
 
-        public float SprintNormalized => sprintStamina / stats.sprintStaminaSeconds;
+        public float SprintNormalized => stats.unlimitedSprint ? 1f : sprintStamina / stats.sprintStaminaSeconds;
+        public bool HasUnlimitedSprint => stats.unlimitedSprint;
         public int LoadedDarts => loadedDarts;
         public bool IsReloading => reloadTimer > 0f;
         public float ReloadProgress => IsReloading ? 1f - reloadTimer / stats.rifleReloadSeconds : 1f;
@@ -150,8 +151,9 @@ namespace PrimalRaid.Players
             Vector3 wish = forward * input.move.y + right * input.move.x;
             bool grounded = body.isGrounded;
 
-            IsSprinting = input.sprintHeld && input.move.y > 0.1f && sprintStamina > 0f && !IsAiming;
-            sprintStamina = IsSprinting
+            IsSprinting = input.sprintHeld && input.move.y > 0.1f && !IsAiming &&
+                          (stats.unlimitedSprint || sprintStamina > 0f);
+            sprintStamina = IsSprinting && !stats.unlimitedSprint
                 ? Mathf.Max(0f, sprintStamina - dt)
                 : Mathf.Min(stats.sprintStaminaSeconds, sprintStamina + stats.sprintRechargePerSecond * dt);
             float speed = IsSprinting ? stats.sprintSpeed : stats.walkSpeed;

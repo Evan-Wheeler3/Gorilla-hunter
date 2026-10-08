@@ -19,7 +19,8 @@ namespace PrimalRaid.Core
         // Movement
         public float walkSpeed = 4f;
         public float sprintSpeed = 6f;
-        public float sprintStaminaSeconds = 10f;     // owner: longer sprint; assumption
+        public bool unlimitedSprint = true;          // hunters are the hunted minority; see DESIGN_CHANGES.md
+        public float sprintStaminaSeconds = 10f;     // used only when unlimitedSprint is off
         public float sprintRechargePerSecond = 2.5f; // assumption: full recharge in 4 s
         public float groundAcceleration = 40f;       // assumption
         public float airAcceleration = 8f;           // assumption

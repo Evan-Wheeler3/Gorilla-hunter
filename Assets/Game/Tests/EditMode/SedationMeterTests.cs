@@ -125,5 +125,51 @@ namespace PrimalRaid.Tests
             Assert.That(meter.CutBinding(), Is.False);
             Assert.That(meter.State, Is.EqualTo(SedationState.Collapsed));
         }
+
+        [Test]
+        public void SlapKnocksTimeOffAKnockout()
+        {
+            Dart();
+            Assert.That(meter.Slap(), Is.EqualTo(SedationEvent.None));
+            Assert.That(meter.RemainingDowntime, Is.EqualTo(stats.collapseSeconds - stats.slapWakeSeconds));
+        }
+
+        [Test]
+        public void RepeatedSlapsWakeAGorilla()
+        {
+            Dart();
+            int slaps = 0;
+            while (meter.IsDown && slaps < 100)
+            {
+                meter.Slap();
+                slaps++;
+            }
+            Assert.That(meter.State, Is.EqualTo(SedationState.Awake));
+            Assert.That(slaps, Is.EqualTo((int)System.Math.Ceiling(stats.collapseSeconds / stats.slapWakeSeconds)));
+        }
+
+        [Test]
+        public void SlapsAlsoWorkOnBoundGorillas()
+        {
+            Dart();
+            meter.Bind();
+            meter.Slap();
+            Assert.That(meter.RemainingDowntime, Is.EqualTo(stats.boundSeconds - stats.slapWakeSeconds));
+        }
+
+        [Test]
+        public void SlappingAnAwakeGorillaDoesNothing()
+        {
+            Assert.That(meter.Slap(), Is.EqualTo(SedationEvent.None));
+            Assert.That(meter.State, Is.EqualTo(SedationState.Awake));
+        }
+
+        [Test]
+        public void KnockoutClockRunsSlowerWhileDragged()
+        {
+            Dart();
+            meter.Tick(10f, stats.draggedDowntimeRate);
+            Assert.That(meter.RemainingDowntime, Is.EqualTo(stats.collapseSeconds - 10f * stats.draggedDowntimeRate).Within(1e-4));
+        }
     }
 }

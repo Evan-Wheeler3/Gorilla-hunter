@@ -13,6 +13,9 @@ namespace PrimalRaid.Combat
         /// <summary>Time of the last dart hit, for the hunter's "you hit this gorilla" ring.</summary>
         public float LastHitTime { get; private set; } = float.NegativeInfinity;
 
+        /// <summary>Knockout clock speed; the drag system lowers it while the body is dragged.</summary>
+        public float DowntimeRate { get; set; } = 1f;
+
         public event Action<SedationTarget> Collapsed;
         public event Action<SedationTarget> Woke;
 
@@ -20,7 +23,7 @@ namespace PrimalRaid.Combat
 
         void Update()
         {
-            if (Meter.Tick(Time.deltaTime) == SedationEvent.Woke)
+            if (Meter.Tick(Time.deltaTime, DowntimeRate) == SedationEvent.Woke)
                 Woke?.Invoke(this);
         }
 
@@ -31,6 +34,13 @@ namespace PrimalRaid.Combat
             LastHitTime = Time.time;
             if (Meter.Add(amount))
                 Collapsed?.Invoke(this);
+        }
+
+        /// <summary>A teammate's slap: knocks time off the knockout and may wake the gorilla.</summary>
+        public void Slap()
+        {
+            if (Meter.Slap() == SedationEvent.Woke)
+                Woke?.Invoke(this);
         }
 
         public void DebugSet(float value)

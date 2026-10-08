@@ -59,7 +59,8 @@ namespace PrimalRaid.Core
             return true;
         }
 
-        public SedationEvent Tick(float deltaTime)
+        /// <param name="downtimeRate">How fast the knockout clock runs (e.g. slower while dragged).</param>
+        public SedationEvent Tick(float deltaTime, float downtimeRate = 1f)
         {
             if (deltaTime <= 0f)
                 return SedationEvent.None;
@@ -72,7 +73,7 @@ namespace PrimalRaid.Core
                 return SedationEvent.None;
             }
 
-            RemainingDowntime -= deltaTime;
+            RemainingDowntime -= deltaTime * downtimeRate;
             if (RemainingDowntime > 0f)
                 return SedationEvent.None;
 
@@ -102,6 +103,23 @@ namespace PrimalRaid.Core
 
             Wake();
             return true;
+        }
+
+        /// <summary>
+        /// A teammate slaps a downed (collapsed or bound) gorilla: knocks time off its knockout.
+        /// Returns <see cref="SedationEvent.Woke"/> when the slap wakes it.
+        /// </summary>
+        public SedationEvent Slap()
+        {
+            if (!IsDown)
+                return SedationEvent.None;
+
+            RemainingDowntime -= stats.slapWakeSeconds;
+            if (RemainingDowntime > 0f)
+                return SedationEvent.None;
+
+            Wake();
+            return SedationEvent.Woke;
         }
 
         /// <summary>Debug hook: sets the meter directly while awake (clamped below collapse).</summary>

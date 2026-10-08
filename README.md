@@ -40,6 +40,8 @@ gorilla and a hunter can run, climb, swing, jump and shoot a sedation dart.
 The two characters spawn next to each other south of the temple. The first vine line runs
 north from just beside the gorilla, over the temple. To test darts: press F2, shoot the
 gorilla. One dart drops it, and a dropped gorilla wakes after 15 s (30 s if tied up).
+A second gorilla stands next to yours: F3 > "Knock out teammate", then swipe him to slap
+2 s off his timer per hit.
 
 ## Layout
 

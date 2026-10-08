@@ -15,6 +15,8 @@ namespace PrimalRaid.DevTools
         [SerializeField] bool startAsGorilla = true;
 
         public GorillaController Gorilla { get; private set; }
+        /// <summary>A second, uncontrolled gorilla for testing slaps and darts on a teammate.</summary>
+        public GorillaController Teammate { get; private set; }
         public HunterController Hunter { get; private set; }
         public IControllable Current { get; private set; }
         public GreyboxIslandBuilder.Result Island { get; private set; }
@@ -29,9 +31,11 @@ namespace PrimalRaid.DevTools
 
             Island = GreyboxIslandBuilder.Build(islandSeed);
             Gorilla = GreyboxCharacterFactory.SpawnGorilla(Island.gorillaTestSpawn, 0f);
+            Teammate = GreyboxCharacterFactory.SpawnGorilla(TeammateSpawn, 0f);
+            Teammate.name = "Gorilla Teammate";
             Hunter = GreyboxCharacterFactory.SpawnHunter(Island.hunterTestSpawn, 15f);
 
-            gameObject.AddComponent<GreyboxHud>().Bind(Gorilla, Hunter);
+            gameObject.AddComponent<GreyboxHud>().Bind(Gorilla, Teammate, Hunter);
             debugMenu = gameObject.AddComponent<DebugMenu>();
             debugMenu.Bind(this);
 
@@ -62,8 +66,11 @@ namespace PrimalRaid.DevTools
         public void ResetPositions()
         {
             Gorilla.Teleport(Island.gorillaTestSpawn);
+            Teammate.Teleport(TeammateSpawn);
             Hunter.Teleport(Island.hunterTestSpawn);
         }
+
+        Vector3 TeammateSpawn => Island.gorillaTestSpawn + Vector3.right * 5f;
 
         public static void SetCursorLocked(bool locked)
         {
