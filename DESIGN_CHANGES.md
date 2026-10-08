@@ -16,7 +16,8 @@ live in `GameConfig` and are starting points for playtests.
 | Boats | 1, east shore | 4, one per shore (tested: worst trip ~158 m, ~30 s at sprint with detours, inside the 37.5 s window) |
 | Round length | 12:00, fire at 6:00 | 10:00, fire at 5:00 |
 
-Status: config values are in; the round loop that enforces these rules is the next milestone.
+Status: the rules are built and unit tested in `Core/Match/InfectionRound.cs` and
+`TeamAssignment.cs`; wiring them into a playable round in the scene comes next.
 
 ## Combat and movement
 
@@ -31,6 +32,7 @@ Status: config values are in; the round loop that enforces these rules is the ne
 | Gorilla slaps a downed teammate | only cut a binding (3 s) | every swipe on a downed gorilla knocks 2 s off its timer (8 slaps wake it from 15 s) | built |
 | Hunter sprint | 3 s | unlimited (can be switched back to a 10 s bar) | built |
 | Gorilla swipe | 50 dmg, two hits kill | 100 dmg, one hit kills | built |
+| Finishers | play on a successful grab | play on every kill (any swipe kill); grab may be cut | picker built and tested; animations later |
 | Dragging | 40% speed alone, no sprint | full speed, sprint allowed | config only, drag arrives next milestone |
 
 Playtest check: with one-dart drops and one-hit kills, every fight is decided by who lands

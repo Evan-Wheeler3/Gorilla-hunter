@@ -19,6 +19,7 @@ namespace PrimalRaid.Config
         public TrapStats traps = new TrapStats();
         public DragStats drag = new DragStats();
         public MatchStats match = new MatchStats();
+        public FinisherStats finishers = new FinisherStats();
         public WorldStats world = new WorldStats();
         public ControlStats controls = new ControlStats();
 
