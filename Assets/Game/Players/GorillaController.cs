@@ -183,7 +183,7 @@ namespace PrimalRaid.Players
             Vector3 wish = forward * input.move.y + right * input.move.x;
             Vector3 horizontal = new Vector3(velocity.x, 0f, velocity.z);
             bool grounded = body.isGrounded;
-            float slow = landingSlowTimer > 0f ? stats.swingLandingSlowMultiplier : 1f;
+            float slow = (landingSlowTimer > 0f ? stats.swingLandingSlowMultiplier : 1f) * sedation.Meter.SpeedMultiplier;
 
             if (input.dashPressed && dashCooldownTimer <= 0f && stamina >= stats.dashStaminaCost)
             {
@@ -306,8 +306,9 @@ namespace PrimalRaid.Players
             Vector3 right = Vector3.Cross(Vector3.up, facing);
             transform.rotation = Quaternion.LookRotation(facing);
 
-            float up = input.move.y * stats.climbSpeed;
-            Vector3 move = Vector3.up * up + right * (input.move.x * stats.climbSpeed * 0.6f) + facing * ClimbStickSpeed;
+            float climbSpeed = stats.climbSpeed * sedation.Meter.SpeedMultiplier;
+            float up = input.move.y * climbSpeed;
+            Vector3 move = Vector3.up * up + right * (input.move.x * climbSpeed * 0.6f) + facing * ClimbStickSpeed;
             velocity = Vector3.up * up;
             body.Move(move * dt);
 

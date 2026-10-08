@@ -8,13 +8,17 @@ namespace PrimalRaid.Core
     {
         public int minPlayers = 4;
         public int maxPlayers = 12;
-        public int playersPerGorilla = 4;     // gorillas = ceil(players / 4)
+        // Infection mode (owner): few hunters start; a gorilla dragged to the boat becomes a hunter.
+        public int playersPerStartingHunter = 5;      // hunters = ceil(players / 5): 10 players = 2 v 8
+        public int sharedHunterLives = 100;           // team respawn pool, battlefield-style
+        public float hunterRespawnSeconds = 5f;       // assumption
+        public bool lastGorillaGetsPermanentRage = true;
         public int roundsPerMatch = 3;
 
         public float briefingSeconds = 20f;
         public float hunterHeadStartSeconds = 20f;
-        public float roundSeconds = 720f;     // 12:00
-        public float fireStartSeconds = 360f; // 6:00
+        public float roundSeconds = 600f;     // owner: 10:00
+        public float fireStartSeconds = 300f; // 5:00
         public float fireSpeed = 1.5f;        // m/s, west to east
         public float fireLethalSeconds = 2f;
 

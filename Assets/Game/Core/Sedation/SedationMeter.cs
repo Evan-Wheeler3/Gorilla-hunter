@@ -17,13 +17,14 @@ namespace PrimalRaid.Core
     }
 
     /// <summary>
-    /// Pure sedation math for one gorilla. The meter fills from darts and traps, decays while
-    /// awake, and at max collapses the gorilla for a fixed downtime. Engine-free so it can be
+    /// Pure sedation math for one gorilla. The meter fills from darts and traps, holds for a
+    /// short delay after each hit, then decays; at max it collapses the gorilla for a fixed downtime. Engine-free so it can be
     /// unit tested and run on the host.
     /// </summary>
     public sealed class SedationMeter
     {
         readonly SedationStats stats;
+        float holdRemaining;
 
         public SedationMeter(SedationStats stats)
         {
@@ -39,6 +40,9 @@ namespace PrimalRaid.Core
         public bool IsDown => State != SedationState.Awake;
         public float Normalized => stats.maxSedation <= 0f ? 0f : Value / stats.maxSedation;
 
+        /// <summary>Move speed multiplier while awake: darts slow the gorilla in proportion to the meter.</summary>
+        public float SpeedMultiplier => IsDown ? 0f : 1f - stats.maxSlow * Normalized;
+
         /// <summary>Adds sedation. Returns true if this dose caused a collapse. Ignored while down.</summary>
         public bool Add(float amount)
         {
@@ -46,6 +50,7 @@ namespace PrimalRaid.Core
                 return false;
 
             Value = Math.Min(stats.maxSedation, Value + amount);
+            holdRemaining = stats.decayDelaySeconds;
             if (Value < stats.maxSedation)
                 return false;
 
@@ -61,7 +66,9 @@ namespace PrimalRaid.Core
 
             if (!IsDown)
             {
-                Value = Math.Max(0f, Value - stats.decayPerSecond * deltaTime);
+                float held = Math.Min(holdRemaining, deltaTime);
+                holdRemaining -= held;
+                Value = Math.Max(0f, Value - stats.decayPerSecond * (deltaTime - held));
                 return SedationEvent.None;
             }
 
@@ -115,6 +122,7 @@ namespace PrimalRaid.Core
             State = SedationState.Awake;
             Value = 0f;
             RemainingDowntime = 0f;
+            holdRemaining = 0f;
         }
     }
 }

@@ -1,10 +1,10 @@
 # Primal Raid
 
-Gorillas vs. hunters on a voxel jungle island. A few huge gorillas hunt a larger team of
-hunters; the hunters must sedate every gorilla and drag it to the boat before they are torn
-apart. Unity (C#), Steam, Windows first.
+Gorillas vs. hunters on a voxel jungle island, infection style. A pack of huge gorillas hunts
+a couple of hunters; every gorilla the hunters sedate and drag to the boat joins the hunters. Unity (C#), Steam, Windows first.
 
-The full brief is the "Primal Raid: Full Game Design & Build Plan" doc. This repo is currently
+The full brief is the "Primal Raid: Full Game Design & Build Plan" doc. Owner decisions that
+change it are tracked in [DESIGN_CHANGES.md](DESIGN_CHANGES.md). This repo is currently
 at the doc's **first task**: project structure, the GameConfig, and a greybox scene where a
 gorilla and a hunter can run, climb, swing, jump and shoot a sedation dart.
 
@@ -27,19 +27,20 @@ gorilla and a hunter can run, climb, swing, jump and shoot a sedation dart.
 | Key | Gorilla | Hunter |
 | --- | --- | --- |
 | WASD / mouse | Knuckle-run, look (third person) | Walk, look (first person) |
-| Shift | Dash | Sprint (3 s) |
+| Shift | Dash | Sprint (10 s) |
 | Space | Jump (6 m); jump off a trunk while climbing | Jump |
 | W into a trunk or temple wall | Climb (S down, A/D sideways); reaching a branch, crown or roof mantles onto it | |
 | Left mouse | Swipe; **hold** near a vine knot (shown as "[hold LMB]") to swing, release to launch | Fire tranq dart |
 | Right mouse | | Aim down sights |
-| R | | Reload (5 s) |
+| R | | Reload (also automatic after each shot, 3.5 s) |
 | F1 / F2 | Possess gorilla / hunter | |
 | F3 | Debug menu: sedation, collapse/wake/bind, stamina, revive, teleports, slow motion | |
 | Esc | Release the mouse (click to recapture) | |
 
 The two characters spawn next to each other south of the temple. The first vine line runs
 north from just beside the gorilla, over the temple. To test darts: press F2, shoot the
-gorilla (F1 back to see the sedation vignette). Three darts within 2.5 s collapse it.
+gorilla (F1 back to see the sedation vignette). Two darts within about 4 s drop it, and a
+dropped gorilla wakes after 15 s.
 
 ## Layout
 

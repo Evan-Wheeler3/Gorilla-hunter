@@ -15,98 +15,113 @@ namespace PrimalRaid.Tests
             meter = new SedationMeter(stats);
         }
 
+        void Dart() => meter.Add(stats.dartSedation);
+
         [Test]
-        public void DartAddsConfiguredSedation()
+        public void OneDartDoesNotDropAGorilla()
         {
-            meter.Add(stats.dartSedation);
-            Assert.That(meter.Value, Is.EqualTo(40f));
+            Dart();
             Assert.That(meter.State, Is.EqualTo(SedationState.Awake));
+            Assert.That(meter.Value, Is.EqualTo(stats.dartSedation));
         }
 
         [Test]
-        public void MeterDecaysWhileAwakeAndStopsAtZero()
+        public void OneDartHoldsThenWearsOffInAboutFiveSeconds()
         {
-            meter.Add(40f);
-            meter.Tick(2f);
-            Assert.That(meter.Value, Is.EqualTo(24f).Within(1e-4));
-            meter.Tick(10f);
+            Dart();
+            meter.Tick(stats.decayDelaySeconds);
+            Assert.That(meter.Value, Is.EqualTo(stats.dartSedation));
+            meter.Tick(0.5f);
+            Assert.That(meter.Value, Is.GreaterThan(0f).And.LessThan(stats.dartSedation));
+            meter.Tick(0.6f);
             Assert.That(meter.Value, Is.EqualTo(0f));
         }
 
         [Test]
-        public void ReachingMaxCollapsesForCollapseDuration()
+        public void HoldAndDecaySplitCorrectlyInsideOneTick()
         {
-            Assert.That(meter.Add(60f), Is.False);
-            Assert.That(meter.Add(40f), Is.True);
+            Dart();
+            meter.Tick(stats.decayDelaySeconds + 0.2f);
+            Assert.That(meter.Value, Is.EqualTo(stats.dartSedation - stats.decayPerSecond * 0.2f).Within(1e-3));
+        }
+
+        [Test]
+        public void TwoDartsBackToBackDropAGorilla()
+        {
+            Dart();
+            Assert.That(meter.Add(stats.dartSedation), Is.True);
             Assert.That(meter.State, Is.EqualTo(SedationState.Collapsed));
-            Assert.That(meter.RemainingDowntime, Is.EqualTo(40f));
+            Assert.That(meter.RemainingDowntime, Is.EqualTo(stats.collapseSeconds));
         }
 
         [Test]
-        public void ThreeDartsOneSecondApartCollapse()
+        public void OneHunterCanDropAGorillaAcrossAReload()
         {
-            meter.Add(40f);
-            meter.Tick(1f);
-            meter.Add(40f);
-            meter.Tick(1f);
-            Assert.That(meter.Add(40f), Is.True);
+            // Dart, 3.5 s auto-reload, dart: the first dart is still held at full strength.
+            Dart();
+            meter.Tick(new HunterStats().rifleReloadSeconds);
+            Assert.That(meter.Add(stats.dartSedation), Is.True);
         }
 
         [Test]
-        public void ThreeDartsSpreadOverFiveSecondsDoNotCollapse()
+        public void DartsMoreThanFiveSecondsApartDoNotDrop()
         {
-            // With 40 per dart and 8/s decay, three darts must land within 2.5 s in total.
-            // The design doc's "within about 5 seconds" is too loose; flagged to the owner.
-            meter.Add(40f);
-            meter.Tick(2.5f);
-            meter.Add(40f);
-            meter.Tick(2.5f);
-            Assert.That(meter.Add(40f), Is.False);
-            Assert.That(meter.Value, Is.EqualTo(80f).Within(1e-4));
+            Dart();
+            meter.Tick(5.1f);
+            Assert.That(meter.Add(stats.dartSedation), Is.False);
+            Assert.That(meter.Value, Is.EqualTo(stats.dartSedation));
+        }
+
+        [Test]
+        public void SedationSlowsTheGorillaInProportion()
+        {
+            Assert.That(meter.SpeedMultiplier, Is.EqualTo(1f));
+            Dart();
+            Assert.That(meter.SpeedMultiplier, Is.EqualTo(1f - stats.maxSlow * 0.5f).Within(1e-4));
         }
 
         [Test]
         public void DartsAreIgnoredWhileDown()
         {
-            meter.Add(100f);
-            Assert.That(meter.Add(40f), Is.False);
-            Assert.That(meter.RemainingDowntime, Is.EqualTo(40f));
+            meter.Add(stats.maxSedation);
+            Assert.That(meter.Add(stats.dartSedation), Is.False);
+            Assert.That(meter.RemainingDowntime, Is.EqualTo(stats.collapseSeconds));
         }
 
         [Test]
         public void MeterDoesNotDecayWhileDown()
         {
-            meter.Add(100f);
-            meter.Tick(10f);
-            Assert.That(meter.Value, Is.EqualTo(100f));
-            Assert.That(meter.RemainingDowntime, Is.EqualTo(30f).Within(1e-4));
+            meter.Add(stats.maxSedation);
+            meter.Tick(5f);
+            Assert.That(meter.Value, Is.EqualTo(stats.maxSedation));
+            Assert.That(meter.RemainingDowntime, Is.EqualTo(stats.collapseSeconds - 5f).Within(1e-4));
         }
 
         [Test]
         public void WakesAfterDowntimeWithEmptyMeter()
         {
-            meter.Add(100f);
-            Assert.That(meter.Tick(39f), Is.EqualTo(SedationEvent.None));
+            meter.Add(stats.maxSedation);
+            Assert.That(meter.Tick(stats.collapseSeconds - 1f), Is.EqualTo(SedationEvent.None));
             Assert.That(meter.Tick(1.5f), Is.EqualTo(SedationEvent.Woke));
             Assert.That(meter.State, Is.EqualTo(SedationState.Awake));
             Assert.That(meter.Value, Is.EqualTo(0f));
         }
 
         [Test]
-        public void BindingExtendsDowntimeToBoundDuration()
+        public void BindingSetsDowntimeToBoundDuration()
         {
-            meter.Add(100f);
-            meter.Tick(10f);
+            meter.Add(stats.maxSedation);
+            meter.Tick(5f);
             Assert.That(meter.Bind(), Is.True);
             Assert.That(meter.State, Is.EqualTo(SedationState.Bound));
-            Assert.That(meter.RemainingDowntime, Is.EqualTo(90f));
+            Assert.That(meter.RemainingDowntime, Is.EqualTo(stats.boundSeconds));
         }
 
         [Test]
         public void CannotBindAnAwakeOrAlreadyBoundGorilla()
         {
             Assert.That(meter.Bind(), Is.False);
-            meter.Add(100f);
+            meter.Add(stats.maxSedation);
             meter.Bind();
             Assert.That(meter.Bind(), Is.False);
         }
@@ -114,7 +129,7 @@ namespace PrimalRaid.Tests
         [Test]
         public void CuttingBindingFreesImmediately()
         {
-            meter.Add(100f);
+            meter.Add(stats.maxSedation);
             meter.Bind();
             Assert.That(meter.CutBinding(), Is.True);
             Assert.That(meter.State, Is.EqualTo(SedationState.Awake));
@@ -124,7 +139,7 @@ namespace PrimalRaid.Tests
         [Test]
         public void CannotCutBindingOfUnboundGorilla()
         {
-            meter.Add(100f);
+            meter.Add(stats.maxSedation);
             Assert.That(meter.CutBinding(), Is.False);
             Assert.That(meter.State, Is.EqualTo(SedationState.Collapsed));
         }

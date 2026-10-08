@@ -46,7 +46,7 @@ namespace PrimalRaid.Core
 
         // Swipe
         public float swipeCooldown = 0.6f;
-        public float swipeDamage = 50f;          // two swipes kill a 100 hp hunter
+        public float swipeDamage = 100f;         // owner: one hit kills a hunter
         public float swipeRange = 2.6f;          // assumption
         public float swipeKnockback = 9f;        // assumption
 

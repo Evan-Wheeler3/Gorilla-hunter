@@ -14,13 +14,13 @@ namespace PrimalRaid.Core
         public float radius = 0.35f;
         public float eyeHeight = 1.62f;
 
-        public float maxHealth = 100f;
+        public float maxHealth = 100f;               // gorilla swipe does 100: one hit kills
 
         // Movement
         public float walkSpeed = 4f;
         public float sprintSpeed = 6f;
-        public float sprintStaminaSeconds = 3f;
-        public float sprintRechargePerSecond = 1f;   // assumption: full recharge in 3 s
+        public float sprintStaminaSeconds = 10f;     // owner: longer sprint; assumption
+        public float sprintRechargePerSecond = 2.5f; // assumption: full recharge in 4 s
         public float groundAcceleration = 40f;       // assumption
         public float airAcceleration = 8f;           // assumption
         public float jumpHeight = 1.1f;              // assumption
@@ -28,11 +28,11 @@ namespace PrimalRaid.Core
 
         // Tranq rifle
         public int rifleMagazine = 1;
-        public float rifleReloadSeconds = 5f;
+        public float rifleReloadSeconds = 3.5f;      // owner: 3 to 4 s
         public float dartSpeed = 80f;
         public float dartGravity = 4f;               // "slight drop"; assumption
-        public float dartLifetime = 4f;              // assumption
-        public bool rifleAutoReload = false;         // assumption: doc maps reload to R
+        public float dartLifetime = 10f;             // owner: no real range limit, only drop; ~800 m of flight
+        public bool rifleAutoReload = true;          // owner
 
         // Pistol
         public int pistolMagazine = 12;
