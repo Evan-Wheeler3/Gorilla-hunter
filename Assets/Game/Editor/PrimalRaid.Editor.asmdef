@@ -1,0 +1,14 @@
+{
+    "name": "PrimalRaid.Editor",
+    "rootNamespace": "PrimalRaid.EditorTools",
+    "references": ["PrimalRaid.Config", "PrimalRaid.DevTools"],
+    "includePlatforms": ["Editor"],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

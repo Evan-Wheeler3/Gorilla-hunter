@@ -1,0 +1,14 @@
+{
+    "name": "PrimalRaid.UI",
+    "rootNamespace": "PrimalRaid.UI",
+    "references": ["PrimalRaid.Core", "PrimalRaid.Config", "PrimalRaid.Combat", "PrimalRaid.Players", "PrimalRaid.World"],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
