@@ -1,10 +1,9 @@
 using PrimalRaid.Combat;
 using PrimalRaid.Config;
-using PrimalRaid.Players;
 using PrimalRaid.World;
 using UnityEngine;
 
-namespace PrimalRaid.DevTools
+namespace PrimalRaid.Players
 {
     /// <summary>
     /// Builds greybox gorillas and hunters out of box body parts (head, torso, arms, legs, hat,

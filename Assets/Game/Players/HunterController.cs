@@ -8,8 +8,9 @@ namespace PrimalRaid.Players
 {
     /// <summary>
     /// Hunter movement and the tranq rifle (design doc section 5): walk, limited sprint, jump,
-    /// first-person look, aim down sights, and a one-dart magazine with a long reload.
-    /// Pistol, traps, flare, tripwire, bind and drag arrive in week 2.
+    /// first-person look, aim down sights, a one-dart auto-reloading rifle, and (via
+    /// <see cref="HunterInteraction"/>) tying up and dragging downed gorillas.
+    /// Pistol, traps, flare and tripwire come later.
     /// </summary>
     [RequireComponent(typeof(CharacterController), typeof(Health))]
     public sealed class HunterController : MonoBehaviour, IControllable, IKnockbackReceiver
@@ -23,6 +24,8 @@ namespace PrimalRaid.Players
         CharacterController body;
         Health health;
         HunterStats stats;
+        DragStats drag;
+        HunterInteraction interaction;
         float gravity;
         float sensitivity;
 
@@ -36,6 +39,7 @@ namespace PrimalRaid.Players
         float sprintStamina;
         int loadedDarts;
         float reloadTimer;
+        float stunTimer;
 
         public float SprintNormalized => stats.unlimitedSprint ? 1f : sprintStamina / stats.sprintStaminaSeconds;
         public bool HasUnlimitedSprint => stats.unlimitedSprint;
@@ -48,6 +52,17 @@ namespace PrimalRaid.Players
         public Health Health => health;
         public Vector3 Velocity => body.velocity;
 
+        public GorillaController Dragging => interaction.Dragging;
+        public GorillaController InteractTarget => interaction.Target;
+        public float BindProgress => interaction.BindProgress;
+        public bool IsStunned => stunTimer > 0f;
+
+        /// <summary>Held at camp during the briefing.</summary>
+        public bool IsHeld { get; set; }
+
+        /// <summary>Where a dragged body is pulled to: just behind the hunter.</summary>
+        public Vector3 DragAnchor => transform.position - transform.forward * 2.4f;
+
         public string DisplayName => "Hunter";
         public bool HasControl { get; private set; }
         public Camera ViewCamera => viewCamera;
@@ -56,6 +71,8 @@ namespace PrimalRaid.Players
         {
             var config = GameConfig.Active;
             stats = config.hunter;
+            drag = config.drag;
+            interaction = new HunterInteraction(this);
             gravity = config.world.gravity;
             sensitivity = config.controls.mouseSensitivity;
 
@@ -94,6 +111,9 @@ namespace PrimalRaid.Players
         public void Revive()
         {
             health.Revive();
+            stunTimer = 0f;
+            loadedDarts = stats.rifleMagazine;
+            reloadTimer = 0f;
             if (visual != null)
                 visual.localRotation = Quaternion.identity;
         }
@@ -105,6 +125,17 @@ namespace PrimalRaid.Players
             body.enabled = false;
             transform.position = position;
             body.enabled = true;
+        }
+
+        public void Stun(float seconds) => stunTimer = Mathf.Max(stunTimer, seconds);
+
+        internal void ReleaseDrag() => interaction.Release();
+
+        internal void OnDraggedGorillaWoke()
+        {
+            interaction.Clear();
+            Stun(drag.wakeThrowStunSeconds);
+            ApplyKnockback(-transform.forward * 6f + Vector3.up * 3f);
         }
 
         public void ApplyKnockback(Vector3 impulse)
@@ -121,12 +152,17 @@ namespace PrimalRaid.Players
                 return;
 
             var input = HasControl && !IsDead ? KeyboardMouseInput.Read(sensitivity) : PlayerInput.None;
+            stunTimer -= dt;
+            if (IsStunned || IsHeld)
+                input = new PlayerInput { look = IsStunned ? Vector2.zero : input.look };
 
             if (!IsDead)
                 UpdateLook(input, dt);
             UpdateMovement(input, dt);
-            if (!IsDead)
-                UpdateRifle(input, dt);
+            if (IsDead)
+                return;
+            interaction.Tick(input, dt);
+            UpdateRifle(input, dt, canFire: Dragging == null);
         }
 
         void UpdateLook(PlayerInput input, float dt)
@@ -151,12 +187,15 @@ namespace PrimalRaid.Players
             Vector3 wish = forward * input.move.y + right * input.move.x;
             bool grounded = body.isGrounded;
 
-            IsSprinting = input.sprintHeld && input.move.y > 0.1f && !IsAiming &&
+            bool sprintAllowed = Dragging == null || drag.canSprintWhileDragging;
+            IsSprinting = input.sprintHeld && input.move.y > 0.1f && !IsAiming && sprintAllowed &&
                           (stats.unlimitedSprint || sprintStamina > 0f);
             sprintStamina = IsSprinting && !stats.unlimitedSprint
                 ? Mathf.Max(0f, sprintStamina - dt)
                 : Mathf.Min(stats.sprintStaminaSeconds, sprintStamina + stats.sprintRechargePerSecond * dt);
             float speed = IsSprinting ? stats.sprintSpeed : stats.walkSpeed;
+            if (Dragging != null)
+                speed *= DragSpeedMultiplier();
 
             Vector3 horizontal = new Vector3(velocity.x, 0f, velocity.z);
             float accel = grounded ? stats.groundAcceleration : stats.airAcceleration;
@@ -176,7 +215,13 @@ namespace PrimalRaid.Players
                 velocity.y = 0f;
         }
 
-        void UpdateRifle(PlayerInput input, float dt)
+        float DragSpeedMultiplier()
+        {
+            var table = drag.speedMultiplierByDraggers;
+            return table == null || table.Length == 0 ? 1f : table[0]; // one dragger per body for now
+        }
+
+        void UpdateRifle(PlayerInput input, float dt, bool canFire)
         {
             if (reloadTimer > 0f)
             {
@@ -195,7 +240,7 @@ namespace PrimalRaid.Players
                 return;
             }
 
-            if (input.primaryPressed && loadedDarts > 0 && viewCamera != null)
+            if (canFire && input.primaryPressed && loadedDarts > 0 && viewCamera != null)
             {
                 var muzzle = viewCamera.transform;
                 TranqDart.Fire(muzzle.position + muzzle.forward * MuzzleForwardOffset, muzzle.forward, transform);
@@ -207,6 +252,7 @@ namespace PrimalRaid.Players
 
         void OnDied()
         {
+            interaction.Release();
             reloadTimer = 0f;
             IsAiming = false;
             IsSprinting = false;

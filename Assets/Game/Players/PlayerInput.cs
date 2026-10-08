@@ -16,6 +16,7 @@ namespace PrimalRaid.Players
         public bool primaryPressed;
         public bool primaryHeld;
         public bool secondaryHeld;
+        public bool interactPressed;
         public bool interactHeld;
         public bool reloadPressed;
         public bool abilityPressed;   // gorilla chest beat (Q)
@@ -50,6 +51,7 @@ namespace PrimalRaid.Players
                 primaryPressed = Input.GetMouseButtonDown(0),
                 primaryHeld = Input.GetMouseButton(0),
                 secondaryHeld = Input.GetMouseButton(1),
+                interactPressed = Input.GetKeyDown(KeyCode.E),
                 interactHeld = Input.GetKey(KeyCode.E),
                 reloadPressed = Input.GetKeyDown(KeyCode.R),
                 abilityPressed = Input.GetKeyDown(KeyCode.Q),

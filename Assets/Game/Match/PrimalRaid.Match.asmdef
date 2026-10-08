@@ -1,7 +1,7 @@
 {
-    "name": "PrimalRaid.UI",
-    "rootNamespace": "PrimalRaid.UI",
-    "references": ["PrimalRaid.Core", "PrimalRaid.Config", "PrimalRaid.Combat", "PrimalRaid.Players", "PrimalRaid.World", "PrimalRaid.Match"],
+    "name": "PrimalRaid.Match",
+    "rootNamespace": "PrimalRaid.Match",
+    "references": ["PrimalRaid.Core", "PrimalRaid.Config", "PrimalRaid.Combat", "PrimalRaid.Players", "PrimalRaid.World"],
     "includePlatforms": [],
     "excludePlatforms": [],
     "allowUnsafeCode": false,

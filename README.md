@@ -4,9 +4,10 @@ Gorillas vs. hunters on a voxel jungle island, infection style. A pack of huge g
 a couple of hunters; every gorilla the hunters sedate and drag to the boat joins the hunters. Unity (C#), Steam, Windows first.
 
 The full brief is the "Primal Raid: Full Game Design & Build Plan" doc. Owner decisions that
-change it are tracked in [DESIGN_CHANGES.md](DESIGN_CHANGES.md). This repo is currently
-at the doc's **first task**: project structure, the GameConfig, and a greybox scene where a
-gorilla and a hunter can run, climb, swing, jump and shoot a sedation dart.
+change it are tracked in [DESIGN_CHANGES.md](DESIGN_CHANGES.md). The greybox scene
+runs offline infection rounds: gorillas run, climb, swing and swipe; hunters dart, tie up and
+drag gorillas to a boat, where they join the hunters. Characters you are not playing stand
+idle until bots exist.
 
 ## Run the greybox
 
@@ -33,15 +34,19 @@ gorilla and a hunter can run, climb, swing, jump and shoot a sedation dart.
 | Left mouse | Swipe; **hold** near a vine knot (shown as "[hold LMB]") to swing, release to launch | Fire tranq dart |
 | Right mouse | | Aim down sights |
 | R | | Reload (also automatic after each shot, 3.5 s) |
-| F1 / F2 | Possess gorilla / hunter | |
-| F3 | Debug menu: sedation, collapse/wake/bind, stamina, revive, teleports, slow motion | |
+| E | | Near a downed gorilla: tap to drag (tap again to drop), hold 3 s to tie up |
+| Swipe a downed gorilla | Slap 2 s off his knockout | |
+| F5 | New round | |
+| F1 / F2 | Possess next gorilla / next hunter | |
+| F3 | Debug menu: round control, team sizes, knock out or wake gorillas, teleports, slow motion | |
 | Esc | Release the mouse (click to recapture) | |
 
-The two characters spawn next to each other south of the temple. The first vine line runs
-north from just beside the gorilla, over the temple. To test darts: press F2, shoot the
-gorilla. One dart drops it, and a dropped gorilla wakes after 15 s (30 s if tied up).
-A second gorilla stands next to yours: F3 > "Knock out teammate", then swipe him to slap
-2 s off his timer per hit.
+A round starts on Play: you are a hunter, 3 gorillas stand just north of you, south of the
+temple, and the first vine line runs north beside them over the temple. Try a full loop:
+dart a gorilla (one dart drops it for 15 s), tap E next to it, and sprint to the nearest
+yellow boat beam. The knockout clock runs at 40% while you drag. Reaching the beam turns
+the gorilla into a hunter; converting all of them wins. F1 lets you play a gorilla: swipe a
+hunter to kill (a finisher name is announced) or swipe a downed gorilla to slap it awake.
 
 ## Layout
 
@@ -51,9 +56,10 @@ Assets/Game/
   Config/    GameConfig ScriptableObject: every tunable number
   World/     climbable and swing-anchor markers, greybox island builder
   Combat/    health, sedation target, tranq dart
-  Players/   input, gorilla and hunter controllers, third-person camera
+  Players/   input, gorilla and hunter controllers, drag/tie-up, camera, character factory
+  Match/     MatchManager: runs infection rounds in the scene
   UI/        placeholder HUD
-  DevTools/  greybox bootstrap, character factory, F3 debug menu
+  DevTools/  greybox bootstrap, F3 debug menu
   Editor/    Primal Raid menu
   Tests/     EditMode NUnit tests
   Net/ Finishers/ Bots/ Audio/ Art/   reserved for later milestones

@@ -165,7 +165,8 @@ namespace PrimalRaid.World
             dock.localPosition = new Vector3(spec.x, 0f, spec.z);
             dock.localRotation = Quaternion.Euler(0f, spec.outwardYaw, 0f);
 
-            GreyboxMaterials.Box("Pier", dock, new Vector3(-10f, 0.6f, 0f), new Vector3(30f, 0.4f, 6f), Wood);
+            // Pier top at 0.3 m: low enough for a dragged body to slide up onto it.
+            GreyboxMaterials.Box("Pier", dock, new Vector3(-10f, 0.1f, 0f), new Vector3(30f, 0.4f, 6f), Wood);
             for (int i = 0; i < 6; i++)
                 GreyboxMaterials.Box("Post", dock, new Vector3(-23f + i * 5f, 0f, 3.2f), new Vector3(0.4f, 2f, 0.4f), Wood);
             GreyboxMaterials.Box("Boat Hull", dock, new Vector3(8f, 0f, -5f), new Vector3(16f, 2.2f, 6f), Wood);

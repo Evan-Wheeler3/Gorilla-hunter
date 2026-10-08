@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using PrimalRaid.Combat;
 using PrimalRaid.Config;
@@ -28,6 +29,7 @@ namespace PrimalRaid.Players
         const float ClimbStickSpeed = 1.5f;
         const float AnchorReattachDelay = 0.4f;
         const float ReclimbDelay = 0.35f;
+        const float DragFollowMaxSpeed = 15f;
 
         static readonly RaycastHit[] rayHits = new RaycastHit[16];
         static readonly Collider[] overlapHits = new Collider[16];
@@ -74,6 +76,19 @@ namespace PrimalRaid.Players
         public float LastSwipeTime { get; private set; } = float.NegativeInfinity;
         public bool IsLandingSlowed => landingSlowTimer > 0f;
         public SedationTarget Sedation => sedation;
+
+        /// <summary>The hunter dragging this gorilla's sedated body, or null.</summary>
+        public HunterController Dragger { get; private set; }
+        public bool IsBeingDragged => Dragger != null;
+
+        /// <summary>Permanent rage for the last gorilla: faster swipes, no stamina costs.</summary>
+        public bool RageActive { get; private set; }
+
+        /// <summary>Held in the nest (briefing and hunter head start): can look but not move.</summary>
+        public bool IsHeld { get; set; }
+
+        /// <summary>Raised when this gorilla's swipe kills a hunter (every kill plays a finisher).</summary>
+        public event Action<GorillaController, Health> KilledHunter;
 
         public string DisplayName => "Gorilla";
         public bool HasControl { get; private set; }
@@ -122,6 +137,35 @@ namespace PrimalRaid.Players
                 cameraRig.gameObject.SetActive(hasControl);
         }
 
+        public void SetRage(bool active) => RageActive = active;
+
+        internal bool TryBeginDrag(HunterController hunter)
+        {
+            if (State != MoveState.Collapsed || Dragger != null)
+                return false;
+            Dragger = hunter;
+            sedation.DowntimeRate = GameConfig.Active.sedation.draggedDowntimeRate;
+            return true;
+        }
+
+        internal void EndDrag(HunterController hunter)
+        {
+            if (Dragger != hunter)
+                return;
+            Dragger = null;
+            sedation.DowntimeRate = 1f;
+        }
+
+        void OnDestroy()
+        {
+            if (Dragger != null)
+                Dragger.ReleaseDrag();
+            if (cameraRig != null)
+                Destroy(cameraRig.gameObject);
+        }
+
+        float Cost(float amount) => RageActive ? 0f : amount;
+
         /// <summary>Debug: refill stamina.</summary>
         public void RefillStamina() => stamina = stats.maxStamina;
 
@@ -143,6 +187,8 @@ namespace PrimalRaid.Players
                 return;
 
             var input = HasControl ? KeyboardMouseInput.Read(sensitivity) : PlayerInput.None;
+            if (IsHeld)
+                input = new PlayerInput { look = input.look };
             if (cameraRig != null)
                 cameraRig.Look(input.look);
 
@@ -186,11 +232,11 @@ namespace PrimalRaid.Players
             bool grounded = body.isGrounded;
             float slow = (landingSlowTimer > 0f ? stats.swingLandingSlowMultiplier : 1f) * sedation.Meter.SpeedMultiplier;
 
-            if (input.dashPressed && dashCooldownTimer <= 0f && stamina >= stats.dashStaminaCost)
+            if (input.dashPressed && dashCooldownTimer <= 0f && stamina >= Cost(stats.dashStaminaCost))
             {
                 dashTimer = stats.dashDuration;
                 dashCooldownTimer = stats.dashCooldown;
-                stamina -= stats.dashStaminaCost;
+                stamina -= Cost(stats.dashStaminaCost);
                 dashDirection = wish.sqrMagnitude > 0.01f ? wish.normalized : forward;
             }
 
@@ -223,7 +269,7 @@ namespace PrimalRaid.Players
                 return;
             }
 
-            if (input.primaryHeld && AnchorInRange != null && stamina >= stats.swingAttachStaminaCost)
+            if (input.primaryHeld && AnchorInRange != null && stamina >= Cost(stats.swingAttachStaminaCost))
             {
                 EnterSwing(AnchorInRange);
                 return;
@@ -289,7 +335,7 @@ namespace PrimalRaid.Players
 
         void UpdateClimbing(PlayerInput input, float dt)
         {
-            stamina -= stats.climbStaminaDrainPerSecond * dt;
+            stamina -= Cost(stats.climbStaminaDrainPerSecond) * dt;
             if (stamina <= 0f)
             {
                 stamina = 0f;
@@ -434,7 +480,7 @@ namespace PrimalRaid.Players
             State = MoveState.Swinging;
             swingAnchor = anchor;
             ropeLength = Mathf.Max(stats.swingMinRopeLength, Vector3.Distance(Center, anchor.Point));
-            stamina -= stats.swingAttachStaminaCost;
+            stamina -= Cost(stats.swingAttachStaminaCost);
             dashTimer = 0f;
         }
 
@@ -490,7 +536,7 @@ namespace PrimalRaid.Players
         {
             if (swipeCooldownTimer > 0f)
                 return;
-            swipeCooldownTimer = stats.swipeCooldown;
+            swipeCooldownTimer = stats.swipeCooldown * (RageActive ? stats.rageSwipeCooldownMultiplier : 1f);
             LastSwipeTime = Time.time;
 
             float reach = stats.swipeRange * 0.6f;
@@ -511,9 +557,11 @@ namespace PrimalRaid.Players
                 }
 
                 var health = overlapHits[i].GetComponentInParent<Health>();
-                if (health == null || health.transform == transform || !swipeVictims.Add(health))
+                if (health == null || health.transform == transform || health.IsDead || !swipeVictims.Add(health))
                     continue;
                 health.TakeDamage(stats.swipeDamage, knockback);
+                if (health.IsDead)
+                    KilledHunter?.Invoke(this, health);
             }
         }
 
@@ -527,6 +575,9 @@ namespace PrimalRaid.Players
                 body.enabled = true;
             State = MoveState.Collapsed;
             velocity = new Vector3(0f, Mathf.Min(0f, velocity.y), 0f);
+            // Lying down: shrink the capsule to the body on the ground so it can be dragged under branches.
+            body.height = stats.radius * 2f;
+            body.center = Vector3.up * stats.radius;
             if (visual != null)
             {
                 visual.localRotation = Quaternion.Euler(0f, 0f, 90f);
@@ -536,6 +587,14 @@ namespace PrimalRaid.Players
 
         void OnWoke()
         {
+            if (Dragger != null)
+            {
+                var hunter = Dragger;
+                EndDrag(hunter);
+                hunter.OnDraggedGorillaWoke(); // wakes up swinging: the dragger is thrown off and stunned
+            }
+            body.height = stats.height;
+            body.center = Vector3.up * (stats.height * 0.5f);
             State = MoveState.Locomotion;
             if (visual != null)
             {
@@ -546,9 +605,18 @@ namespace PrimalRaid.Players
 
         void UpdateCollapsed(float dt)
         {
-            // Placeholder for the ragdoll: lie still under gravity. Dragging arrives in week 2.
-            velocity.x = 0f;
-            velocity.z = 0f;
+            // Placeholder for the ragdoll: lie under gravity, or slide along behind the dragging hunter.
+            Vector3 horizontal = Vector3.zero;
+            if (Dragger != null)
+            {
+                Vector3 toAnchor = Dragger.DragAnchor - transform.position;
+                toAnchor.y = 0f;
+                horizontal = Vector3.ClampMagnitude(toAnchor / dt, DragFollowMaxSpeed);
+                if (horizontal.sqrMagnitude > 0.01f)
+                    transform.rotation = Quaternion.LookRotation(-horizontal); // dragged feet first
+            }
+            velocity.x = horizontal.x;
+            velocity.z = horizontal.z;
             velocity.y = body.isGrounded ? StickToGroundSpeed : velocity.y - gravity * dt;
             body.Move(velocity * dt);
         }

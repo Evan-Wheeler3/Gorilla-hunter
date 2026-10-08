@@ -58,6 +58,7 @@ namespace PrimalRaid.Core
         public float ragePerKill = 25f;
         public float rageDecayPerSecond = 1f;    // doc says "decays slowly"; assumption
         public float rageModeDuration = 15f;
+        public float rageSwipeCooldownMultiplier = 0.5f; // "faster swipes"; assumption
 
         // Chest beat
         public float chestBeatCooldown = 20f;

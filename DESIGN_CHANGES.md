@@ -16,8 +16,9 @@ live in `GameConfig` and are starting points for playtests.
 | Boats | 1, east shore | 4, one per shore (tested: worst trip ~158 m, ~30 s at sprint with detours, inside the 37.5 s window) |
 | Round length | 12:00, fire at 6:00 | 10:00, fire at 5:00 |
 
-Status: the rules are built and unit tested in `Core/Match/InfectionRound.cs` and
-`TeamAssignment.cs`; wiring them into a playable round in the scene comes next.
+Status: the rules are unit tested (`Core/Match/InfectionRound.cs`, `TeamAssignment.cs`) and
+playable offline in the greybox scene through `Match/MatchManager.cs`. Not yet: bots,
+networking, the wildfire itself, finisher animations.
 
 ## Combat and movement
 
@@ -33,7 +34,8 @@ Status: the rules are built and unit tested in `Core/Match/InfectionRound.cs` an
 | Hunter sprint | 3 s | unlimited (can be switched back to a 10 s bar) | built |
 | Gorilla swipe | 50 dmg, two hits kill | 100 dmg, one hit kills | built |
 | Finishers | play on a successful grab | play on every kill (any swipe kill); grab may be cut | picker built and tested; animations later |
-| Dragging | 40% speed alone, no sprint | full speed, sprint allowed | config only, drag arrives next milestone |
+| Dragging | 40% speed alone, no sprint | full speed, sprint allowed; tap E to grab or drop, hold E 3 s to tie up | built |
+| Gorilla wakes while dragged | throws off nearby hunters (1.5 s stun) | same, for the dragger | built |
 
 Playtest check: with one-dart drops and one-hit kills, every fight is decided by who lands
 the first hit. If hunters dominate, lengthen the reload; if gorillas do, shorten it.
