@@ -36,7 +36,7 @@ namespace PrimalRaid.Core
     public sealed class ControlStats
     {
         public float mouseSensitivity = 2f;
-        public float thirdPersonDistance = 6.5f;
-        public float thirdPersonHeight = 2.4f;
+        public float thirdPersonDistance = 7.5f;
+        public float thirdPersonHeight = 3.6f;   // above the 3.2 m gorilla's head so it doesn't block the view
     }
 }
