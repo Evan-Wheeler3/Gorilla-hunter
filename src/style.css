@@ -131,6 +131,12 @@ body,
 
 .overlay.touch {
   pointer-events: auto;
+  touch-action: none;
+}
+
+.touch-btn,
+.stick-base {
+  touch-action: none;
 }
 
 .hud {

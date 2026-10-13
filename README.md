@@ -16,6 +16,13 @@ npm run dev        # http://localhost:5173 (also reachable from a phone on the s
 
 `npm run build` writes a static site to `dist/` that any static host can serve.
 
+## Hosting
+
+Every push runs the tests and deploys to GitHub Pages
+(`.github/workflows/deploy.yml`): https://evan-wheeler3.github.io/Gorilla-hunter/
+
+One-time setup: repository **Settings → Pages → Build and deployment → Source: GitHub Actions**.
+
 ## Controls
 
 | Action | Desktop | Phone |

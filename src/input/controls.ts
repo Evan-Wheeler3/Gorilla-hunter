@@ -19,6 +19,7 @@ export interface ControlState {
 type ButtonId = 'jump' | 'action' | 'grab' | 'dash' | 'aim';
 
 const PITCH_MIN = -1.1, PITCH_MAX = 0.9;
+const HAS_POINTER = typeof window !== 'undefined' && 'PointerEvent' in window;
 
 /**
  * Unified desktop + touch controls. Desktop: WASD, mouse look (pointer lock), Space, Shift,
@@ -92,28 +93,70 @@ export class Controls {
       const el = div(overlay, `touch-btn ${cls}`);
       this.buttonEls.set(id, el);
       this.touchButtons.set(id, { held: false, pressed: false });
-      el.addEventListener('touchstart', (e) => {
+      const down = (e: Event) => {
         e.preventDefault();
         e.stopPropagation();
+        if (e instanceof PointerEvent) el.setPointerCapture?.(e.pointerId);
         const b = this.touchButtons.get(id)!;
-        if (id === 'aim') b.held = !b.held; // aim is a toggle on touch
-        else b.held = true;
+        b.held = id === 'aim' ? !b.held : true; // aim is a toggle on touch
         b.pressed = true;
         el.classList.toggle('down', b.held);
-      }, { passive: false });
-      el.addEventListener('touchend', (e) => {
+      };
+      const up = (e: Event) => {
         e.preventDefault();
+        e.stopPropagation();
         if (id === 'aim') return;
         this.touchButtons.get(id)!.held = false;
         el.classList.remove('down');
-      }, { passive: false });
+      };
+      if (HAS_POINTER) {
+        el.addEventListener('pointerdown', down);
+        el.addEventListener('pointerup', up);
+        el.addEventListener('pointercancel', up);
+      } else {
+        el.addEventListener('touchstart', down, { passive: false });
+        el.addEventListener('touchend', up, { passive: false });
+        el.addEventListener('touchcancel', up, { passive: false });
+      }
     }
     overlay.classList.toggle('touch', this.isTouch);
 
-    overlay.addEventListener('touchstart', (e) => this.onTouchStart(e), { passive: false });
-    overlay.addEventListener('touchmove', (e) => this.onTouchMove(e), { passive: false });
-    overlay.addEventListener('touchend', (e) => this.onTouchEnd(e), { passive: false });
-    overlay.addEventListener('touchcancel', (e) => this.onTouchEnd(e), { passive: false });
+    // Joystick and look. Pointer Events are the most reliable in embedded web views (the
+    // Claude app, in-app browsers); old browsers fall back to Touch Events.
+    if (HAS_POINTER) {
+      overlay.addEventListener('pointerdown', (e) => {
+        if (e.pointerType === 'mouse') return;
+        e.preventDefault();
+        overlay.setPointerCapture?.(e.pointerId);
+        this.fingerDown(e.pointerId, e.clientX, e.clientY);
+      });
+      overlay.addEventListener('pointermove', (e) => {
+        if (e.pointerType === 'mouse') return;
+        e.preventDefault();
+        this.fingerMove(e.pointerId, e.clientX, e.clientY);
+      });
+      const end = (e: PointerEvent) => this.fingerUp(e.pointerId);
+      overlay.addEventListener('pointerup', end);
+      overlay.addEventListener('pointercancel', end);
+      overlay.addEventListener('lostpointercapture', end);
+    } else {
+      overlay.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        for (const t of Array.from(e.changedTouches)) this.fingerDown(t.identifier, t.clientX, t.clientY);
+      }, { passive: false });
+      overlay.addEventListener('touchmove', (e) => {
+        e.preventDefault();
+        for (const t of Array.from(e.changedTouches)) this.fingerMove(t.identifier, t.clientX, t.clientY);
+      }, { passive: false });
+      const end = (e: TouchEvent) => {
+        for (const t of Array.from(e.changedTouches)) this.fingerUp(t.identifier);
+      };
+      overlay.addEventListener('touchend', end, { passive: false });
+      overlay.addEventListener('touchcancel', end, { passive: false });
+    }
+    // Stop the page itself from scrolling, zooming or bouncing under the thumbs.
+    document.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
+    document.addEventListener('gesturestart', (e) => e.preventDefault());
   }
 
   /** Relabels the touch buttons for the player's role. */
@@ -140,53 +183,45 @@ export class Controls {
     this.pitch = Math.max(PITCH_MIN, Math.min(PITCH_MAX, this.pitch - dy));
   }
 
-  private onTouchStart(e: TouchEvent): void {
+  private fingerDown(id: number, x: number, y: number): void {
     if (!this.enabled) return;
-    e.preventDefault();
-    for (const t of Array.from(e.changedTouches)) {
-      if (t.clientX < innerWidth * 0.45 && this.stick.id < 0) {
-        this.stick = { id: t.identifier, ox: t.clientX, oy: t.clientY, x: 0, y: 0 };
-        this.stickBase.style.left = `${t.clientX}px`;
-        this.stickBase.style.top = `${t.clientY}px`;
-        this.stickBase.classList.add('active');
-      } else if (this.look.id < 0) {
-        this.look = { id: t.identifier, x: t.clientX, y: t.clientY };
-      }
+    if (x < innerWidth * 0.45 && this.stick.id < 0) {
+      this.stick = { id, ox: x, oy: y, x: 0, y: 0 };
+      this.stickBase.style.left = `${x}px`;
+      this.stickBase.style.top = `${y}px`;
+      this.stickBase.classList.add('active');
+    } else if (this.look.id < 0 && this.stick.id !== id) {
+      this.look = { id, x, y };
     }
   }
 
-  private onTouchMove(e: TouchEvent): void {
-    e.preventDefault();
+  private fingerMove(id: number, x: number, y: number): void {
     const radius = 55;
-    for (const t of Array.from(e.changedTouches)) {
-      if (t.identifier === this.stick.id) {
-        let dx = t.clientX - this.stick.ox, dy = t.clientY - this.stick.oy;
-        const d = Math.hypot(dx, dy);
-        if (d > radius) {
-          dx *= radius / d;
-          dy *= radius / d;
-        }
-        this.stick.x = dx / radius;
-        this.stick.y = -dy / radius;
-        this.stickKnob.style.transform = `translate(${dx}px, ${dy}px)`;
-      } else if (t.identifier === this.look.id) {
-        const s = config.controls.touchSensitivity;
-        this.turn((t.clientX - this.look.x) * s, (t.clientY - this.look.y) * s);
-        this.look.x = t.clientX;
-        this.look.y = t.clientY;
+    if (id === this.stick.id) {
+      let dx = x - this.stick.ox, dy = y - this.stick.oy;
+      const d = Math.hypot(dx, dy);
+      if (d > radius) {
+        dx *= radius / d;
+        dy *= radius / d;
       }
+      this.stick.x = dx / radius;
+      this.stick.y = -dy / radius;
+      this.stickKnob.style.transform = `translate(${dx}px, ${dy}px)`;
+    } else if (id === this.look.id) {
+      const s = config.controls.touchSensitivity;
+      this.turn((x - this.look.x) * s, (y - this.look.y) * s);
+      this.look.x = x;
+      this.look.y = y;
     }
   }
 
-  private onTouchEnd(e: TouchEvent): void {
-    for (const t of Array.from(e.changedTouches)) {
-      if (t.identifier === this.stick.id) {
-        this.stick = { id: -1, ox: 0, oy: 0, x: 0, y: 0 };
-        this.stickKnob.style.transform = '';
-        this.stickBase.classList.remove('active');
-      }
-      if (t.identifier === this.look.id) this.look.id = -1;
+  private fingerUp(id: number): void {
+    if (id === this.stick.id) {
+      this.stick = { id: -1, ox: 0, oy: 0, x: 0, y: 0 };
+      this.stickKnob.style.transform = '';
+      this.stickBase.classList.remove('active');
     }
+    if (id === this.look.id) this.look.id = -1;
   }
 
   /** Test hook: queue one-shot presses (jump, dash, primary, interact) for the next read. */
