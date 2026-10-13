@@ -3,7 +3,7 @@ import type { FinisherPick } from '../core/finishers';
 import { Rng } from '../core/rng';
 import type { Dart } from '../game/match';
 import type { VoxelWorld } from '../world/voxelWorld';
-import { GORE_COLORS, HUNTER_DEBRIS_COLORS } from './characters';
+import { GORE_COLORS, HEAD_COLORS, HUNTER_DEBRIS_COLORS } from './characters';
 
 const GORE = new Set(GORE_COLORS);
 
@@ -240,7 +240,28 @@ export class Effects {
   }
 
   /** A spray of voxel cubes from a point; `dir` biases the spray. */
+  /** Speed lines streaming off a dashing body. */
+  streak(at: { x: number; y: number; z: number }, vx: number, vz: number): void {
+    for (let i = 0; i < 3; i++)
+      this.spawn({
+        x: at.x + (Math.random() - 0.5) * 1.2,
+        y: at.y + 0.3 + Math.random() * 2.2,
+        z: at.z + (Math.random() - 0.5) * 1.2,
+        vx: -vx * 0.25,
+        vy: 0,
+        vz: -vz * 0.25,
+        size: 0.09,
+        color: 0xf2f2f2,
+        life: 0.3,
+        gravity: 0,
+      });
+  }
+
+  /** Called for every sizeable spray of gore (the game plays a splat). */
+  onGore: (at: { x: number; y: number; z: number }, count: number) => void = () => {};
+
   burst(at: { x: number; y: number; z: number }, colors: number[], count: number, speed: number, dir?: { x: number; y: number; z: number }, size = 0.16): void {
+    if (count >= 10 && (colors === GORE_COLORS || colors === HEAD_COLORS || colors === HUNTER_DEBRIS_COLORS)) this.onGore(at, count);
     for (let i = 0; i < count; i++) {
       const color = colors[(Math.random() * colors.length) | 0];
       this.spawn({

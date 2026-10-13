@@ -525,6 +525,8 @@ export class FinisherDirector {
   private readonly active = new Map<number, Active>();
   /** Called at each finisher's big moment (the game slows time for the players involved). */
   onClimax: (involvesLocal: boolean) => void = () => {};
+  /** Voice cues: the victim screams when grabbed, the gorilla roars at the kill. */
+  onVoice: (kind: 'scream' | 'roar', at: V) => void = () => {};
 
   constructor(
     private readonly scene: THREE.Scene,
@@ -615,6 +617,7 @@ export class FinisherDirector {
     };
     ctx.stand(victimAt);
     puppet.setScream(true);
+    this.onVoice('scream', victimAt);
     this.active.set(kill.killer, {
       gorillaId: kill.killer,
       involvesLocal: kill.killer === localId || kill.victim === localId,
@@ -637,6 +640,7 @@ export class FinisherDirector {
     this.scene.add(puppet.root);
     puppet.setScream(true);
     puppet.root.position.set(kill.at.x, kill.at.y, kill.at.z);
+    this.onVoice('scream', v3(kill.at.x, kill.at.y, kill.at.z));
     puppet.root.rotation.y = Math.atan2(-kill.dash.x, -kill.dash.z); // facing the charge
     puppet.root.updateMatrixWorld(true);
     const dir = v3(kill.dash.x, 0, kill.dash.z).normalize();
@@ -718,6 +722,7 @@ export class FinisherDirector {
       if (!a.climaxed && a.t >= a.script.climax) {
         a.climaxed = true;
         this.onClimax(a.involvesLocal);
+        this.onVoice('roar', a.ctx.origin);
       }
       if (a.t >= a.duration + 0.2) this.stop(a.gorillaId);
     }

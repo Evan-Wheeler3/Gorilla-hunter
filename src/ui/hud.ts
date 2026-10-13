@@ -58,6 +58,11 @@ export class Hud {
     this.hint.style.display = text ? '' : 'none';
   }
 
+  /** Crosshair turns pink while it is over a gorilla. */
+  setOnTarget(on: boolean): void {
+    this.crosshair.classList.toggle('on-target', on);
+  }
+
   update(match: Match, me: Gorilla | Hunter | undefined, project: Project, _now: number): void {
     const r = match.round;
     const t = r.timeRemaining;

@@ -8,6 +8,8 @@ import { buildVoxelPart, inRoundedBox } from './voxelModel';
 // ---------------------------------------------------------------------- shared helpers
 
 /** Smoothly moves a value toward a target (frame-rate independent). */
+const mix = (a: number, b: number, k: number) => a + (b - a) * k;
+
 export const damp = (current: number, target: number, rate: number, dt: number) =>
   current + (target - current) * (1 - Math.exp(-rate * dt));
 
@@ -34,9 +36,13 @@ const rand = (x: number, y: number, z: number) => {
 
 // ---------------------------------------------------------------------- gorilla
 
-const FUR = 0x4f4440, FUR_HI = 0x6a5a53, SILVER = 0xb3aaa0, SKIN = 0x8f7262, DARK = 0x231a18;
-const EYE_W = 0xf1ece2, EYE = 0x1a100c, MOUTH = 0x3a1f1c;
-const furColor = (x: number, y: number, z: number) => (rand(x, y, z) < 0.18 ? FUR_HI : FUR);
+// Warm, mid-tone fur so the body reads in the shade of the canopy, not as a black silhouette.
+const FUR = 0x6b5a50, FUR_HI = 0x8a7568, FUR_LO = 0x55463e, SILVER = 0xd2c9bd, SKIN = 0xa9877a, DARK = 0x2e2220;
+const EYE_W = 0xf6f1e6, EYE = 0x2a1a10, MOUTH = 0x4a2420;
+const furColor = (x: number, y: number, z: number) => {
+  const r = rand(x, y, z);
+  return r < 0.2 ? FUR_HI : r > 0.85 ? FUR_LO : FUR;
+};
 
 interface GorillaGeometry {
   torso: THREE.BufferGeometry;
@@ -536,6 +542,18 @@ export class HunterRig {
     } else {
       arm[0].x += s * 0.25 * amp;
     }
+    // Reload: tip the rifle up, work the bolt with the free hand, snap it back to the shoulder.
+    const sinceShot = time - h.lastShotTime;
+    const reloadFor = config.hunter.rifleReloadSeconds;
+    if (!h.loaded && h.dragging === null && sinceShot > 0.25 && sinceShot < reloadFor) {
+      const p = (sinceShot - 0.25) / (reloadFor - 0.25);
+      const work = Math.sin(Math.min(1, p * 1.15) * Math.PI); // in and out of the reload pose
+      const bolt = p > 0.55 && p < 0.85 ? Math.sin(((p - 0.55) / 0.3) * Math.PI * 2) : 0;
+      rifle = { x: mix(rifle.x, 0.1, work), y: mix(rifle.y, 0.55, work), z: mix(rifle.z, 0.32, work), rx: mix(rifle.rx, -0.9, work), ry: mix(rifle.ry, -0.4, work) };
+      arm[0] = { x: mix(arm[0].x, -1.6 + bolt * 0.35, work), z: mix(arm[0].z, -0.35, work), fore: mix(arm[0].fore, -1.4 + bolt * 0.4, work) };
+      arm[1] = { x: mix(arm[1].x, -1.2, work), z: arm[1].z, fore: mix(arm[1].fore, -1.0, work) };
+      headX += 0.25 * work; // looks down at the breech
+    }
 
     if (time - h.lastShotTime < 0.05) this.recoil = 0.35;
     this.recoil = damp(this.recoil, 0, 12, dt);
@@ -560,6 +578,16 @@ export class HunterRig {
     this.rifle.position.set(damp(this.rifle.position.x, rifle.x, k, dt), damp(this.rifle.position.y, rifle.y, k, dt), damp(this.rifle.position.z, rifle.z, k, dt));
     this.rifle.rotation.x = damp(this.rifle.rotation.x, rifle.rx - this.recoil * 0.6, k, dt);
     this.rifle.rotation.y = damp(this.rifle.rotation.y, rifle.ry, k, dt);
+  }
+
+  /** Semi-transparent, so your own hunter does not block the shot while aiming. */
+  setGhost(on: boolean): void {
+    const target = on ? 0.3 : 1;
+    if (this.material.opacity === target) return;
+    this.material.transparent = on;
+    this.material.opacity = target;
+    this.material.depthWrite = !on;
+    this.material.needsUpdate = true;
   }
 
   setScream(on: boolean): void {

@@ -27,17 +27,19 @@ One-time setup: repository **Settings → Pages → Build and deployment → Sou
 
 | Action | Desktop | Phone |
 | --- | --- | --- |
-| Move | WASD | Left thumb joystick (push all the way to run) |
+| Move | WASD | Left thumb joystick |
 | Look | Mouse (click the game to capture it, Esc frees it) | Drag with the right thumb |
 | Jump | Space | JUMP |
-| Hunter: sprint | Shift (unlimited) | Push the joystick fully |
-| Hunter: fire dart | Left click | FIRE (light aim assist) |
-| Hunter: aim | Right click (hold) | AIM (toggle) |
+| Hunter: sprint | Shift (unlimited) | Push the joystick past half-way |
+| Hunter: fire dart | Left click | FIRE (light aim assist; slide your thumb on it to steer) |
+| Hunter: aim (shows the dart's drop and landing spot) | Right click (hold) | AIM, by the left thumb: hold, or tap to lock on and tap again to drop |
 | Hunter: drag / tie up a knocked-out gorilla | E tap / hold 3 s | GRAB tap / hold |
 | Gorilla: swipe (kills a hunter, slaps a downed gorilla awake) | Left click | SWIPE |
 | Gorilla: swing on a vine | Hold left click near a vine knot | Hold SWIPE |
 | Gorilla: climb | Walk into a trunk or temple wall | Same |
 | Gorilla: dash (kills any hunter you dash through) | Shift | DASH |
+
+A red ring under a hunter means a swipe will hit him; an orange ring means a dash will. The bots play every seat nobody is in.
 
 ## Code layout
 

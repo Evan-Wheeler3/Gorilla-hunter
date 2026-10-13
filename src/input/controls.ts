@@ -45,6 +45,11 @@ export class Controls {
   private readonly buttonEls = new Map<ButtonId, HTMLElement>();
   enabled = true;
   private requeued: Partial<ControlState> = {};
+  /** Look sensitivity multiplier, set by the game each frame (lower while aiming, near a target). */
+  lookScale = 1;
+  private aimLatched = false;
+  private aimDownAt = 0;
+  private actionLook = { id: -1, x: 0, y: 0 };
   /** Test hook: values merged into every read (automated browser tests drive the game with it). */
   override: Partial<ControlState> | null = null;
 
@@ -76,7 +81,8 @@ export class Controls {
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
     addEventListener('mousemove', (e) => {
       if (document.pointerLockElement !== canvas) return;
-      this.turn(e.movementX * config.controls.mouseSensitivity, e.movementY * config.controls.mouseSensitivity);
+      const s = config.controls.mouseSensitivity * this.lookScale;
+      this.turn(e.movementX * s, e.movementY * s);
     });
 
     // Touch UI.
@@ -98,22 +104,56 @@ export class Controls {
         e.stopPropagation();
         if (e instanceof PointerEvent) el.setPointerCapture?.(e.pointerId);
         const b = this.touchButtons.get(id)!;
-        b.held = id === 'aim' ? !b.held : true; // aim is a toggle on touch
         b.pressed = true;
+        if (id === 'aim') {
+          // Hold to aim, or tap to lock aim on (tap again to drop it) so the thumb can go back to the stick.
+          if (this.aimLatched) {
+            this.aimLatched = false;
+            b.held = false;
+            b.pressed = false;
+          } else {
+            b.held = true;
+            this.aimDownAt = performance.now();
+          }
+        } else b.held = true;
+        if (id === 'action' && e instanceof PointerEvent) this.actionLook = { id: e.pointerId, x: e.clientX, y: e.clientY };
+        else if (id === 'action' && e instanceof TouchEvent && e.changedTouches[0]) this.actionLook = { id: e.changedTouches[0].identifier, x: e.changedTouches[0].clientX, y: e.changedTouches[0].clientY };
         el.classList.toggle('down', b.held);
       };
       const up = (e: Event) => {
         e.preventDefault();
         e.stopPropagation();
-        if (id === 'aim') return;
-        this.touchButtons.get(id)!.held = false;
+        const b = this.touchButtons.get(id)!;
+        if (id === 'action') this.actionLook.id = -1;
+        if (id === 'aim' && b.held && performance.now() - this.aimDownAt < 250) {
+          this.aimLatched = true; // a quick tap: stay aimed
+          return;
+        }
+        b.held = false;
         el.classList.remove('down');
+      };
+      // The fire button doubles as a look pad: slide the thumb to steer the shot.
+      const move = (id2: number, x: number, y: number) => {
+        if (id !== 'action' || id2 !== this.actionLook.id) return;
+        const s = config.controls.touchSensitivity * this.lookScale;
+        this.turn((x - this.actionLook.x) * s, (y - this.actionLook.y) * s);
+        this.actionLook.x = x;
+        this.actionLook.y = y;
       };
       if (HAS_POINTER) {
         el.addEventListener('pointerdown', down);
         el.addEventListener('pointerup', up);
         el.addEventListener('pointercancel', up);
+        el.addEventListener('pointermove', (e) => {
+          e.stopPropagation();
+          move(e.pointerId, e.clientX, e.clientY);
+        });
       } else {
+        el.addEventListener('touchmove', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          for (const t of Array.from(e.changedTouches)) move(t.identifier, t.clientX, t.clientY);
+        }, { passive: false });
         el.addEventListener('touchstart', down, { passive: false });
         el.addEventListener('touchend', up, { passive: false });
         el.addEventListener('touchcancel', up, { passive: false });
@@ -172,6 +212,15 @@ export class Controls {
     label('grab', 'GRAB', team === 'hunter');
     label('dash', 'DASH', team === 'gorilla');
     label('aim', 'AIM', team === 'hunter');
+    if (team !== 'hunter') this.dropAim();
+  }
+
+  /** Lets go of aim (after a shot is not needed; used when the role changes). */
+  dropAim(): void {
+    this.aimLatched = false;
+    const b = this.touchButtons.get('aim')!;
+    b.held = false;
+    this.buttonEls.get('aim')!.classList.remove('down');
   }
 
   get pointerLocked(): boolean {
@@ -208,7 +257,7 @@ export class Controls {
       this.stick.y = -dy / radius;
       this.stickKnob.style.transform = `translate(${dx}px, ${dy}px)`;
     } else if (id === this.look.id) {
-      const s = config.controls.touchSensitivity;
+      const s = config.controls.touchSensitivity * this.lookScale;
       this.turn((x - this.look.x) * s, (y - this.look.y) * s);
       this.look.x = x;
       this.look.y = y;

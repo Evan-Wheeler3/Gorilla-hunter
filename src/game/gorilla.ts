@@ -48,6 +48,7 @@ export class Gorilla {
   swingPivot: Vec3 | null = null;
 
   private dashTimer = 0;
+  private climbBoost = 0;
   private dashCooldown = 0;
   private dashDir = { x: 0, z: 1 };
   private landingSlow = 0;
@@ -224,6 +225,8 @@ export class Gorilla {
       if (facing) {
         this.state = 'climb';
         this.climbFacing = facing;
+        // Run momentum carries into the first bounds up the trunk.
+        this.climbBoost = Math.min(7, Math.hypot(this.vel.x, this.vel.z) * 0.6);
         this.vel = { x: 0, y: 0, z: 0 };
         this.dashTimer = 0;
         return;
@@ -275,7 +278,8 @@ export class Gorilla {
     this.yaw = Math.atan2(f.x, f.z);
     const r = { x: -f.z, z: f.x };
     const speed = G.climbSpeed * this.sedation.speedMultiplier;
-    const up = input.moveY * speed;
+    this.climbBoost = Math.max(0, this.climbBoost - 9 * dt);
+    const up = input.moveY * speed + (input.moveY > 0 ? this.climbBoost : 0);
     const side = input.moveX * speed * 0.6;
     this.vel = { x: 0, y: up, z: 0 };
     const hit = moveBody(ctx.world, this.body, (r.x * side + f.x * 0.5) * dt, up * dt, (r.z * side + f.z * 0.5) * dt);
@@ -337,6 +341,9 @@ export class Gorilla {
     if (t >= 1) {
       this.state = 'ground';
       this.body.onGround = true;
+      // Roll over the lip and keep going instead of stopping dead.
+      const f = this.climbFacing;
+      this.vel = { x: f.x * 4, y: 0, z: f.z * 4 };
     }
   }
 

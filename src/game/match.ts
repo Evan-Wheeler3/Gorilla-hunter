@@ -401,7 +401,7 @@ export class Match {
 }
 
 /** Ray vs axis-aligned box (slab method). Returns the entry distance, or -1. */
-function rayBox(ox: number, oy: number, oz: number, dx: number, dy: number, dz: number,
+export function rayBox(ox: number, oy: number, oz: number, dx: number, dy: number, dz: number,
   x0: number, y0: number, z0: number, x1: number, y1: number, z1: number): number {
   let tmin = -Infinity, tmax = Infinity;
   for (const [o, d, a, b] of [[ox, dx, x0, x1], [oy, dy, y0, y1], [oz, dz, z0, z1]]) {
