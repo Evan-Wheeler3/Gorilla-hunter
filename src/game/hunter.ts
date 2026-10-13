@@ -78,7 +78,8 @@ export class Hunter {
   /** Muzzle position: right shoulder, slightly ahead. */
   get muzzle(): Vec3 {
     const f = forwardOf(this.yaw), r = rightOf(this.yaw);
-    return { x: this.body.x + f.x * 0.45 + r.x * 0.25, y: this.body.y + 1.42, z: this.body.z + f.z * 0.45 + r.z * 0.25 };
+    const k = H.scale;
+    return { x: this.body.x + f.x * 0.45 * k + r.x * 0.25 * k, y: this.body.y + 1.42 * k, z: this.body.z + f.z * 0.45 * k + r.z * 0.25 * k };
   }
 
   setPosition(p: Vec3): void {

@@ -3,6 +3,7 @@ import type { FinisherPick } from '../core/finishers';
 import { Rng } from '../core/rng';
 import { GORE_COLORS, HEAD_COLORS, HUNTER_DEBRIS_COLORS, HunterRig, type GorillaPose, type GorillaRig } from './characters';
 import type { Effects } from './effects';
+import { config } from '../core/config';
 
 type V = THREE.Vector3;
 const v3 = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
@@ -14,6 +15,11 @@ const ease = (t: number, a: number, b: number) => {
   return x * x * (3 - 2 * x);
 };
 const mix = (a: number, b: number, k: number) => a + (b - a) * k;
+
+// Raw wound caps left where a part tears off.
+const STUMP_MAT = new THREE.MeshLambertMaterial({ color: 0x9e1b2c });
+const STUMP_CORE_MAT = new THREE.MeshLambertMaterial({ color: 0xf0d8c8 });
+const STUMP_GEO = new THREE.BoxGeometry(1, 1, 1);
 
 /** What a finisher script can do while it plays. */
 interface Ctx {
@@ -39,6 +45,15 @@ interface Ctx {
   /** Tears a part off the victim and sends it flying (velocity in world space). */
   fling(part: THREE.Object3D, vel: V, opts?: { burst?: number[]; fuse?: number; life?: number; spin?: number }): void;
   worldPos(obj: THREE.Object3D): V;
+  /** A raw wound cap on `obj` at its local point. */
+  stump(obj: THREE.Object3D, at: V, w?: number, h?: number): void;
+  /** Gore sprays from `obj` at its local point along its local `dir`. */
+  spray(obj: THREE.Object3D, at: V, dir: V, duration: number, speed?: number, rate?: number): void;
+  /**
+   * Tears `part` off its parent: wound caps on both sides and gore pumping from each.
+   * `parentDir` and `partDir` are the spray directions in each one's own space.
+   */
+  tear(part: THREE.Object3D, parentDir: V, partDir: V, w?: number): void;
   /** Kept between frames by scripts that need it. */
   memo: Record<string, unknown>;
 }
@@ -94,12 +109,19 @@ const SCRIPTS: Record<string, Script> = {
         c.place(a, b.clone().sub(a), UP);
         c.puppet.flail(c.time, 1);
       }
+      if (c.t > 0.75 && c.t < 1.0) {
+        // Straining: the waist starts to give.
+        c.memo.strain = ((c.memo.strain as number) ?? 0) + c.dt;
+        if (c.rng.next() < 0.5) c.effects.burst(c.worldPos(c.puppet.hips), GORE_COLORS, 2, 2, { x: 0, y: 1, z: 0 }, 0.1);
+      }
       c.once('split', 1.0, () => {
         const waist = c.worldPos(c.puppet.hips);
+        c.tear(c.puppet.torso, v3(0, 1, 0), v3(0, -1, 0), 0.5);
         c.fling(c.puppet.torso, c.right.clone().multiplyScalar(6).addScaledVector(UP, 5), { spin: 9 });
         c.fling(c.puppet.hips, c.right.clone().multiplyScalar(-6).addScaledVector(UP, 5), { spin: 9 });
-        c.effects.burst(waist, GORE_COLORS, 45, 6, { x: 0, y: 3, z: 0 });
-        c.effects.shake = 0.7;
+        c.effects.burst(waist, GORE_COLORS, 90, 7, { x: 0, y: 3, z: 0 });
+        c.effects.burst(waist, GORE_COLORS, 40, 4, { x: c.forward.x * -3, y: 1, z: c.forward.z * -3 }, 0.24);
+        c.effects.shake = 0.8;
       });
     },
   },
@@ -134,8 +156,14 @@ const SCRIPTS: Record<string, Script> = {
         const head = c.worldPos(c.puppet.head);
         c.fling(c.puppet.helmet, v3(0, 11, 0).addScaledVector(c.forward, 1), { spin: 14 });
         c.puppet.head.visible = false;
-        c.effects.burst(head, HEAD_COLORS, 70, 7, { x: 0, y: 4, z: 0 });
-        c.effects.shake = 0.6;
+        const neck = c.puppet.head.position.clone();
+        c.stump(c.puppet.torso, neck, 0.3);
+        c.spray(c.puppet.torso, neck, v3(0, 1, 0), 1.8, 7, 110);
+        c.effects.burst(head, HEAD_COLORS, 120, 8, { x: 0, y: 4, z: 0 });
+        c.effects.burst(head, GORE_COLORS, 40, 10, { x: 0, y: 1, z: 0 }, 0.1);
+        // Eyes and teeth.
+        c.effects.burst(head, [0xffffff, 0xffffff, 0x1a1a1a], 8, 6, { x: 0, y: 5, z: 0 }, 0.1);
+        c.effects.shake = 0.7;
       });
       c.once('drop', 1.25, () => c.fling(c.puppet.root, c.forward.clone().multiplyScalar(1).addScaledVector(UP, 1), { spin: 2, life: 3 }));
     },
@@ -171,15 +199,22 @@ const SCRIPTS: Record<string, Script> = {
       c.once('rip', 0.55, () => {
         const shoulder = c.worldPos(c.puppet.arms[1].upper);
         const club = c.puppet.arms[1].upper;
+        c.tear(club, club.position.clone().setY(0.4).normalize(), v3(0, 1, 0), 0.22);
         c.gorilla.arms[0].fore.add(club);
         club.position.set(0, -0.95, 0.05);
         club.rotation.set(0, 0, 0);
         c.memo.club = club;
-        c.effects.burst(shoulder, GORE_COLORS, 25, 4);
+        c.effects.burst(shoulder, GORE_COLORS, 55, 5);
       });
       hits.forEach((h, i) =>
         c.once(`hit${i}`, h, () => {
-          c.effects.burst(c.worldPos(c.puppet.head), GORE_COLORS, 14, 4);
+          const head = c.worldPos(c.puppet.head);
+          c.effects.burst(head, GORE_COLORS, 35, 5, { x: c.forward.x * 3, y: 2, z: c.forward.z * 3 });
+          if (i === 0) c.puppet.helmet.visible && c.fling(c.puppet.helmet, c.forward.clone().multiplyScalar(4).addScaledVector(UP, 6), { spin: 12, life: 4 });
+          if (i === 1) {
+            c.effects.burst(head, [0xffffff, 0xf4efe0], 6, 4, { x: c.forward.x * 3, y: 3, z: c.forward.z * 3 }, 0.08); // teeth
+            c.puppet.head.rotation.z = 0.6;
+          }
           c.effects.shake = i === 2 ? 0.7 : 0.3;
           if (i === 2) c.fling(c.puppet.root, c.forward.clone().multiplyScalar(9).addScaledVector(UP, 6), { spin: 10, burst: HUNTER_DEBRIS_COLORS, fuse: 1.6 });
         }),
@@ -231,8 +266,17 @@ const SCRIPTS: Record<string, Script> = {
         const tangent = out.clone().sub(prev).setY(0);
         if (tangent.lengthSq() < 1e-6) tangent.copy(c.right);
         tangent.normalize();
-        c.fling(c.puppet.root, tangent.multiplyScalar(15).addScaledVector(out, 5).addScaledVector(UP, 9), { spin: 16, burst: HUNTER_DEBRIS_COLORS, life: 5 });
+        // The body tears away from the legs still in the gorilla's fists.
+        c.tear(c.puppet.torso, v3(0, 1, 0), v3(0, -1, 0), 0.5);
+        c.fling(c.puppet.torso, tangent.multiplyScalar(15).addScaledVector(out, 5).addScaledVector(UP, 9), { spin: 16, burst: HUNTER_DEBRIS_COLORS, life: 5 });
+        c.effects.burst(mid, GORE_COLORS, 70, 7, { x: out.x * 5, y: 2, z: out.z * 5 });
+        c.effects.shake = 0.6;
       });
+      if (c.t >= 1.85 && c.t < 2.1) {
+        const m = c.hand(0).add(c.hand(1)).multiplyScalar(0.5);
+        c.place(m, UP.clone().negate(), c.forward);
+      }
+      c.once('drop-legs', 2.1, () => c.fling(c.puppet.root, c.forward.clone().multiplyScalar(2).addScaledVector(UP, 2), { spin: 6, life: 4 }));
     },
   },
 
@@ -263,10 +307,11 @@ const SCRIPTS: Record<string, Script> = {
         const cur = (c.memo.s as number) ?? 1;
         const s = cur + (target - cur) * Math.min(1, c.dt * 25);
         c.memo.s = s;
-        if (c.t < 1.1) c.puppet.root.scale.set(1 + (1 - s) * 0.7, s, 1 + (1 - s) * 0.7);
+        const hs = config.hunter.scale;
+        if (c.t < 1.1) c.puppet.root.scale.set((1 + (1 - s) * 0.7) * hs, s * hs, (1 + (1 - s) * 0.7) * hs);
         else {
           // Balled up and starting to roll.
-          c.puppet.root.scale.set(0.8, 0.5, 0.8);
+          c.puppet.root.scale.set(0.8 * hs, 0.5 * hs, 0.8 * hs);
           c.memo.roll = ((c.memo.roll as number) ?? 0) + c.dt * 8;
           c.puppet.root.rotateOnWorldAxis(c.right, -(c.memo.roll as number));
         }
@@ -274,7 +319,13 @@ const SCRIPTS: Record<string, Script> = {
       }
       [0.45, 0.75, 1.05].forEach((s, i) =>
         c.once(`smack${i}`, s, () => {
-          c.effects.burst(c.victimAt.clone().addScaledVector(UP, 0.5), GORE_COLORS, 10, 4);
+          const at = c.victimAt.clone().addScaledVector(UP, 0.5);
+          // Squeezed out sideways with every smack.
+          c.effects.burst(at, GORE_COLORS, 30, 8, { x: 0, y: 1, z: 0 });
+          c.effects.burst(at, GORE_COLORS, 15, 3, { x: c.right.x * 5, y: 1, z: c.right.z * 5 }, 0.2);
+          c.effects.burst(at, GORE_COLORS, 15, 3, { x: -c.right.x * 5, y: 1, z: -c.right.z * 5 }, 0.2);
+          if (i === 0) c.fling(c.puppet.helmet, v3(0, 7, 0).addScaledVector(c.right, 3), { spin: 12, life: 4 });
+          if (i === 1) c.effects.burst(at, [0xffffff, 0xf4efe0], 6, 5, undefined, 0.08);
           c.effects.dust(c.victimAt, 8);
           c.effects.shake = 0.3;
         }),
@@ -306,10 +357,15 @@ const SCRIPTS: Record<string, Script> = {
         const head = c.worldPos(c.puppet.head);
         c.fling(c.puppet.helmet, v3(0, 12, 0), { spin: 15 });
         c.puppet.head.visible = false;
-        c.effects.burst(head, HEAD_COLORS, 35, 3, { x: c.right.x * 7, y: 3, z: c.right.z * 7 });
-        c.effects.burst(head, HEAD_COLORS, 35, 3, { x: -c.right.x * 7, y: 3, z: -c.right.z * 7 });
-        c.effects.shake = 0.6;
+        c.effects.burst(head, HEAD_COLORS, 60, 3, { x: c.right.x * 8, y: 3, z: c.right.z * 8 });
+        c.effects.burst(head, HEAD_COLORS, 60, 3, { x: -c.right.x * 8, y: 3, z: -c.right.z * 8 });
+        c.effects.burst(head, GORE_COLORS, 30, 6, { x: 0, y: 5, z: 0 }, 0.1);
+        const neck = c.puppet.head.position.clone();
+        c.stump(c.puppet.torso, neck, 0.3);
+        c.spray(c.puppet.torso, neck, v3(0, 1, 0), 2.0, 6, 100);
+        c.effects.shake = 0.7;
       });
+      if (c.t > 0.8 && c.t < 1.4) c.puppet.flail(c.time, 0.35 * (1 - ease(c.t, 0.8, 1.4))); // twitching
       c.once('fall', 1.4, () => c.fling(c.puppet.root, v3(0, 1, 0), { burst: HUNTER_DEBRIS_COLORS, fuse: 0.25 }));
     },
   },
@@ -346,19 +402,23 @@ const SCRIPTS: Record<string, Script> = {
       [0.8, 1.25, 1.7].forEach((h, i) =>
         c.once(`slam${i}`, h, () => {
           const head = c.worldPos(c.puppet.head);
-          c.effects.dust(head, 10);
-          c.effects.burst(head, GORE_COLORS, 12, 4);
+          c.effects.dust(head, 12);
+          c.effects.burst(head, GORE_COLORS, 30 + i * 15, 6, { x: 0, y: 3, z: 0 });
+          if (i === 0) c.fling(c.puppet.helmet, c.right.clone().multiplyScalar(-4).addScaledVector(UP, 7), { spin: 14, life: 4 });
+          if (i === 1) c.effects.burst(head, [0xffffff, 0xf4efe0], 6, 5, undefined, 0.08);
           c.effects.shake = 0.45;
         }),
       );
       c.once('break', 2.15, () => {
         const parts = [c.puppet.head, c.puppet.arms[0].upper, c.puppet.arms[1].upper, c.puppet.legs[0].thigh, c.puppet.legs[1].thigh, c.puppet.torso];
+        const dirs = [v3(0, 1, 0), v3(-1, 0.5, 0), v3(1, 0.5, 0), v3(-0.3, -1, 0), v3(0.3, -1, 0), v3(0, -1, 0)];
+        parts.forEach((part, i) => c.tear(part, dirs[i], i === 0 ? v3(0, -1, 0) : v3(0, 1, 0), i === 5 ? 0.5 : 0.22));
         for (const part of parts) {
           const dir = v3(c.rng.range(-1, 1), 0, c.rng.range(-1, 1)).normalize();
           c.fling(part, dir.multiplyScalar(c.rng.range(4, 8)).addScaledVector(UP, c.rng.range(5, 9)), { spin: 12 });
         }
-        c.effects.burst(c.worldPos(c.puppet.hips), GORE_COLORS, 55, 7);
-        c.effects.shake = 0.8;
+        c.effects.burst(c.worldPos(c.puppet.hips), GORE_COLORS, 120, 8);
+        c.effects.shake = 0.9;
       });
     },
   },
@@ -408,7 +468,10 @@ const SCRIPTS: Record<string, Script> = {
         const beat = Math.floor(phase / Math.PI);
         if (u > 0 && beat !== c.memo.beat) {
           c.memo.beat = beat;
-          c.effects.burst(c.worldPos(c.puppet.torso).addScaledVector(UP, 0.3), [0xffe14d, 0xffffff, 0x6fd3ff, 0xff4fa0], 3, 2, { x: 0, y: 4, z: 0 }, 0.12);
+          const chest = c.worldPos(c.puppet.torso).addScaledVector(UP, 0.3);
+          c.effects.burst(chest, [0xffe14d, 0xffffff, 0x6fd3ff, 0xff4fa0], 3, 2, { x: 0, y: 4, z: 0 }, 0.12);
+          c.effects.burst(chest, GORE_COLORS, 4 + Math.min(8, beat), 4, { x: 0, y: 3, z: 0 }, 0.12);
+          if (beat === 6) c.fling(c.puppet.helmet, v3(0, 8, 0).addScaledVector(c.right, -3), { spin: 14, life: 4 });
           c.effects.shake = Math.max(c.effects.shake, 0.08);
         }
       }
@@ -416,6 +479,14 @@ const SCRIPTS: Record<string, Script> = {
         const at = c.worldPos(c.puppet.torso);
         c.puppet.root.visible = false;
         c.effects.burst(at, HUNTER_DEBRIS_COLORS, 110, 9, { x: 0, y: 6, z: 0 });
+        c.effects.burst(at, GORE_COLORS, 160, 11, { x: 0, y: 4, z: 0 });
+        c.effects.burst(at, GORE_COLORS, 60, 14, { x: 0, y: 0.5, z: 0 }, 0.26); // a ring of splatter
+        // Limbs fly out of the blast.
+        for (const limb of [c.puppet.arms[0].upper, c.puppet.arms[1].upper, c.puppet.legs[0].thigh, c.puppet.legs[1].thigh, c.puppet.head]) {
+          c.tear(limb, v3(0, 1, 0), limb === c.puppet.head ? v3(0, -1, 0) : v3(0, 1, 0), 0.22);
+          const dir = v3(c.rng.range(-1, 1), 0, c.rng.range(-1, 1)).normalize();
+          c.fling(limb, dir.multiplyScalar(c.rng.range(6, 11)).addScaledVector(UP, c.rng.range(8, 13)), { spin: 16, life: 6 });
+        }
         c.effects.burst(at, [0xffd34d, 0xff6a13, 0x6fd3ff, 0xff4fa0, 0x8cff6a], 60, 8, { x: 0, y: 8, z: 0 }, 0.12);
         c.effects.shake = 1;
       });
@@ -522,8 +593,28 @@ export class FinisherDirector {
         this.effects.addChunk(part, vel, spin, { burstColors: opts.burst, fuse: opts.fuse, life: opts.life, radius: part === puppet.root ? 0.35 : 0.15 });
       },
       worldPos: (obj) => obj.getWorldPosition(v3()),
+      stump: (obj, at, w = 0.25, h = 0.06) => {
+        const cap = new THREE.Mesh(STUMP_GEO, STUMP_MAT);
+        cap.scale.set(w, h, w * 0.8);
+        cap.position.copy(at);
+        const bone = new THREE.Mesh(STUMP_GEO, STUMP_CORE_MAT);
+        bone.scale.set(0.3, 1.4, 0.3);
+        cap.add(bone);
+        obj.add(cap);
+      },
+      spray: (obj, at, dir, duration, speed = 6, rate = 90) => this.effects.fountain(obj, at, dir, duration, speed, rate),
+      tear: (part, parentDir, partDir, w = 0.25) => {
+        const parent = part.parent;
+        if (parent) {
+          ctx.stump(parent, part.position, w);
+          ctx.spray(parent, part.position, parentDir, 1.6, 6, 90);
+        }
+        ctx.stump(part, v3(), w);
+        ctx.spray(part, v3(), partDir, 1.2, 4, 45);
+      },
     };
     ctx.stand(victimAt);
+    puppet.setScream(true);
     this.active.set(kill.killer, {
       gorillaId: kill.killer,
       involvesLocal: kill.killer === localId || kill.victim === localId,
@@ -543,6 +634,8 @@ export class FinisherDirector {
     return (p) => {
       p.rate = Math.max(p.rate, 30);
       a.script.pose(a.t, p);
+      // Roars from just before the big moment.
+      p.roar = a.t > a.script.climax - 0.15 && a.t < a.script.climax + 0.9;
     };
   }
 

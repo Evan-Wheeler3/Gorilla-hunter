@@ -47,8 +47,10 @@ export const config = {
   },
 
   hunter: {
-    height: 1.8,
-    halfWidth: 0.3,
+    /** Model scale: owner asked for bigger hunters (1.25 makes them 2.25 m). */
+    scale: 1.25,
+    height: 2.25,
+    halfWidth: 0.38,
     maxHealth: 100,
     walkSpeed: 4.5,
     sprintSpeed: 6.5,
@@ -109,9 +111,9 @@ export const config = {
     touchSensitivity: 0.006,
     cameraDistanceGorilla: 6.5,
     cameraHeightGorilla: 3.4,
-    cameraDistanceHunter: 3.6,
-    cameraHeightHunter: 1.75,
-    cameraShoulderHunter: 0.7,
+    cameraDistanceHunter: 4.3,
+    cameraHeightHunter: 2.2,
+    cameraShoulderHunter: 0.85,
   },
 };
 

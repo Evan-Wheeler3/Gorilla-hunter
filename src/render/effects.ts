@@ -3,7 +3,9 @@ import type { FinisherPick } from '../core/finishers';
 import { Rng } from '../core/rng';
 import type { Dart } from '../game/match';
 import type { VoxelWorld } from '../world/voxelWorld';
-import { HUNTER_DEBRIS_COLORS } from './characters';
+import { GORE_COLORS, HUNTER_DEBRIS_COLORS } from './characters';
+
+const GORE = new Set(GORE_COLORS);
 
 interface Particle {
   x: number;
@@ -21,9 +23,23 @@ interface Particle {
   color: THREE.Color;
   bounce: number;
   gravity: number;
+  /** Gore cubes can splat flat on the ground and linger. */
+  gore: boolean;
+  flat: boolean;
 }
 
-const MAX_PARTICLES = 1500;
+/** Sprays gore from a point on a moving body part (a stump) for a while. */
+interface Fountain {
+  obj: THREE.Object3D;
+  local: THREE.Vector3;
+  dir: THREE.Vector3;
+  until: number;
+  speed: number;
+  rate: number;
+  carry: number;
+}
+
+const MAX_PARTICLES = 2500;
 
 /** A detached body part (or a whole body) flying as a rigid piece. */
 interface Chunk {
@@ -36,6 +52,9 @@ interface Chunk {
   burstColors: number[] | null;
   fuse: number;
   radius: number;
+  /** Leaves a trail of gore cubes while flying. */
+  trail: boolean;
+  baseScale: THREE.Vector3;
 }
 
 /**
@@ -54,6 +73,8 @@ export class Effects {
   private readonly v = new THREE.Vector3();
   private readonly sv = new THREE.Vector3();
   private readonly chunks: Chunk[] = [];
+  private readonly fountains: Fountain[] = [];
+  private clock = 0;
   private readonly tmpQ = new THREE.Quaternion();
   /** Camera shake strength, decays over time. */
   shake = 0;
@@ -86,6 +107,8 @@ export class Effects {
       bounce: 0.35,
       gravity: 20,
       maxLife: life,
+      gore: typeof p.color === 'number' && GORE.has(p.color),
+      flat: false,
       ...p,
       life,
       color: p.color instanceof THREE.Color ? p.color : new THREE.Color(p.color),
@@ -158,10 +181,62 @@ export class Effects {
    * Detaches a body part into the world (keeping where it is) and lets it fly. With burstColors
    * it explodes into cubes when it slams into the ground, or when `fuse` seconds run out.
    */
-  addChunk(obj: THREE.Object3D, vel: THREE.Vector3, spin: THREE.Vector3, opts: { life?: number; burstColors?: number[]; fuse?: number; radius?: number } = {}): void {
+  addChunk(obj: THREE.Object3D, vel: THREE.Vector3, spin: THREE.Vector3, opts: { life?: number; burstColors?: number[]; fuse?: number; radius?: number; trail?: boolean } = {}): void {
     this.scene.attach(obj);
-    const life = opts.life ?? 5;
-    this.chunks.push({ obj, vel: vel.clone(), spin: spin.clone(), life, maxLife: life, burstColors: opts.burstColors ?? null, fuse: opts.fuse ?? Infinity, radius: opts.radius ?? 0.15 });
+    const life = opts.life ?? 6;
+    this.chunks.push({
+      obj,
+      vel: vel.clone(),
+      spin: spin.clone(),
+      life,
+      maxLife: life,
+      burstColors: opts.burstColors ?? null,
+      fuse: opts.fuse ?? Infinity,
+      radius: opts.radius ?? 0.15,
+      trail: opts.trail ?? true,
+      baseScale: obj.scale.clone(),
+    });
+  }
+
+  /**
+   * A gore fountain from a stump: `local` is the point on `obj`, `dir` the spray direction in the
+   * object's own space. Keeps spraying as the part moves or flies.
+   */
+  fountain(obj: THREE.Object3D, local: THREE.Vector3, dir: THREE.Vector3, duration: number, speed = 5, rate = 70): void {
+    this.fountains.push({ obj, local: local.clone(), dir: dir.clone().normalize(), until: this.clock + duration, speed, rate, carry: 0 });
+  }
+
+  private updateFountains(dt: number): void {
+    const p = new THREE.Vector3(), d = new THREE.Vector3(), q = new THREE.Quaternion();
+    for (let i = this.fountains.length - 1; i >= 0; i--) {
+      const f = this.fountains[i];
+      if (this.clock > f.until || !f.obj.parent) {
+        this.fountains.splice(i, 1);
+        continue;
+      }
+      f.obj.updateWorldMatrix(true, false);
+      f.obj.localToWorld(p.copy(f.local));
+      d.copy(f.dir).applyQuaternion(f.obj.getWorldQuaternion(q));
+      // Pulses, like a heartbeat, and weakens over time.
+      const left = (f.until - this.clock) / 1.5;
+      const pulse = 0.6 + 0.4 * Math.max(0, Math.sin(this.clock * 14));
+      f.carry += f.rate * dt * pulse;
+      while (f.carry >= 1) {
+        f.carry -= 1;
+        const sp = f.speed * (0.6 + Math.random() * 0.6) * Math.min(1, 0.4 + left);
+        this.spawn({
+          x: p.x,
+          y: p.y,
+          z: p.z,
+          vx: d.x * sp + (Math.random() - 0.5) * 1.5,
+          vy: d.y * sp + (Math.random() - 0.5) * 1.5,
+          vz: d.z * sp + (Math.random() - 0.5) * 1.5,
+          size: 0.07 + Math.random() * 0.08,
+          color: GORE_COLORS[(Math.random() * GORE_COLORS.length) | 0],
+          life: 3 + Math.random() * 4,
+        });
+      }
+    }
   }
 
   /** A spray of voxel cubes from a point; `dir` biases the spray. */
@@ -285,7 +360,10 @@ export class Effects {
           this.chunks.splice(i, 1);
           continue;
         }
-        if (Math.abs(c.vel.y) > 3) this.dust({ x: p.x, y: p.y - c.radius, z: p.z }, 4);
+        if (Math.abs(c.vel.y) > 3) {
+          this.dust({ x: p.x, y: p.y - c.radius, z: p.z }, 4);
+          if (c.trail) this.burst({ x: p.x, y: p.y - c.radius + 0.1, z: p.z }, GORE_COLORS, 8, 3, { x: 0, y: 1, z: 0 }, 0.12);
+        }
         if (!this.world.solidAt(next.x, p.y - c.radius, next.z)) c.vel.y = -c.vel.y * 0.3;
         else c.vel.set(-c.vel.x * 0.3, c.vel.y, -c.vel.z * 0.3);
         c.vel.x *= 0.6;
@@ -293,18 +371,23 @@ export class Effects {
         c.spin.multiplyScalar(0.5);
       } else {
         c.obj.position.add(next.sub(p));
+        // A trail of gore while it flies.
+        if (c.trail && c.vel.lengthSq() > 9 && Math.random() < dt * 40)
+          this.spawn({ x: p.x, y: p.y, z: p.z, vx: (Math.random() - 0.5), vy: Math.random(), vz: (Math.random() - 0.5), size: 0.08 + Math.random() * 0.06, color: GORE_COLORS[(Math.random() * GORE_COLORS.length) | 0], life: 4 });
       }
       this.tmpQ.setFromEuler(this.e.set(c.spin.x * dt, c.spin.y * dt, c.spin.z * dt));
       c.obj.quaternion.premultiply(this.tmpQ);
       // Shrink away at the end of its life.
       const fade = Math.min(1, c.life / 0.6);
-      if (fade < 1) c.obj.scale.setScalar(Math.max(0.01, fade));
+      if (fade < 1) c.obj.scale.copy(c.baseScale).multiplyScalar(Math.max(0.01, fade));
     }
   }
 
   update(dt: number, darts: Dart[]): void {
     this.shake = Math.max(0, this.shake - dt * 1.8);
+    this.clock += dt;
     this.updateChunks(dt);
+    this.updateFountains(dt);
     let n = 0;
     for (let i = this.particles.length - 1; i >= 0; i--) {
       const p = this.particles[i];
@@ -315,9 +398,21 @@ export class Effects {
       }
       p.vy -= p.gravity * dt;
       const nx = p.x + p.vx * dt, ny = p.y + p.vy * dt, nz = p.z + p.vz * dt;
-      if (this.world.solidAt(nx, ny - p.size / 2, nz)) {
-        // Bounce off the ground; scrape to a stop.
-        if (!this.world.solidAt(nx, p.y, nz)) {
+      if (p.flat) {
+        // Splatted: lies on the ground.
+      } else if (this.world.solidAt(nx, ny - p.size / 2, nz)) {
+        // Gore that lands may splat flat and linger; everything else bounces and scrapes to a stop.
+        if (p.gore && Math.random() < 0.4 && !this.world.solidAt(nx, p.y, nz)) {
+          p.flat = true;
+          p.vx = p.vy = p.vz = 0;
+          p.y = Math.floor((ny - p.size / 2) / 0.5) * 0.5 + 0.5 + 0.02;
+          p.rx = 0;
+          p.spin = 0;
+          p.life = Math.max(p.life, 7 + Math.random() * 5);
+          p.maxLife = p.life;
+          p.size *= 1.2 + Math.random() * 0.8;
+          p.color.multiplyScalar(0.55); // soaks in darker than the spray
+        } else if (!this.world.solidAt(nx, p.y, nz)) {
           p.vy = -p.vy * p.bounce;
           p.vx *= 0.6;
           p.vz *= 0.6;
@@ -336,7 +431,7 @@ export class Effects {
       const fade = Math.min(1, p.life / Math.min(1, p.maxLife * 0.3));
       const s = p.size * fade;
       this.q.setFromEuler(this.e.set(p.rx, p.ry, 0));
-      this.m4.compose(this.v.set(p.x, p.y, p.z), this.q, this.sv.set(s, s, s));
+      this.m4.compose(this.v.set(p.x, p.y, p.z), this.q, p.flat ? this.sv.set(s, 0.04, s) : this.sv.set(s, s, s));
       this.cubes.setMatrixAt(n, this.m4);
       this.cubes.setColorAt(n, p.color);
       n++;

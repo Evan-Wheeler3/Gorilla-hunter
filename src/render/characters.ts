@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { Gorilla } from '../game/gorilla';
 import type { Hunter } from '../game/hunter';
+import { config } from '../core/config';
 import { forwardOf } from '../game/types';
 import { buildVoxelPart, inRoundedBox } from './voxelModel';
 
@@ -40,6 +41,8 @@ const furColor = (x: number, y: number, z: number) => (rand(x, y, z) < 0.18 ? FU
 interface GorillaGeometry {
   torso: THREE.BufferGeometry;
   head: THREE.BufferGeometry;
+  /** Mouth wide open, teeth bared. */
+  roarHead: THREE.BufferGeometry;
   upper: THREE.BufferGeometry[];
   fore: THREE.BufferGeometry[];
   thigh: THREE.BufferGeometry[];
@@ -70,6 +73,23 @@ function gorillaGeometry(): GorillaGeometry {
         if (x >= 1 && x <= 7 && y <= 6) return SKIN;
       }
       if (z >= 7 && x >= 2 && x <= 6 && y <= 4) return SKIN; // muzzle
+      return furColor(x, y, z);
+    }, [4.5, 0, 4.5]),
+    roarHead: buildVoxelPart(9, 10, 10, vs, (x, y, z) => {
+      if (z === 9) return y >= 6 && y <= 7 && x >= 1 && x <= 7 ? DARK : null;
+      if (!inRoundedBox(x, y, z, 9, 10, 9, 2)) return y === 9 && x >= 3 && x <= 5 && z >= 2 && z <= 6 ? FUR : null;
+      if (z >= 7 && y <= 2 && x >= 2 && x <= 6) {
+        if (y === 2 && z === 8) return x % 2 === 0 ? 0xf4efe0 : 0x2a0a0a; // fangs
+        if (y === 0 && z === 8) return x % 2 === 1 ? 0xf4efe0 : 0x2a0a0a;
+        return z === 8 ? 0x2a0a0a : 0x8a2a2a; // open mouth, tongue behind
+      }
+      if (z === 8) {
+        if (y === 5 && (x === 2 || x === 6)) return 0xffd0b0; // eyes wide and angry
+        if (y === 5 && (x === 3 || x === 5)) return 0xb01010;
+        if (y === 4 && (x === 3 || x === 5)) return DARK;
+        if (x >= 1 && x <= 7 && y <= 6) return SKIN;
+      }
+      if (z >= 7 && x >= 2 && x <= 6 && y <= 4) return SKIN;
       return furColor(x, y, z);
     }, [4.5, 0, 4.5]),
     upper: [],
@@ -112,6 +132,8 @@ export interface GorillaPose {
   leg: { x: number; shin: number }[];
   /** Pose smoothing rate; finishers raise it for snappy, hand-timed motion. */
   rate: number;
+  /** Mouth open in a roar. */
+  roar: boolean;
 }
 
 /** Voxel gorilla with a joint hierarchy; animated procedurally from the simulation state. */
@@ -124,16 +146,23 @@ export class GorillaRig {
   readonly arms: { upper: THREE.Group; fore: THREE.Group }[] = [];
   readonly legs: { thigh: THREE.Group; shin: THREE.Group }[] = [];
   private readonly material = new THREE.MeshLambertMaterial({ vertexColors: true });
+  private readonly headMesh: THREE.Mesh;
   private swipeTwist = 0;
   private lieAmount = 0;
   private yawOffset = 0;
+  private lastYaw = 0;
+  private bank = 0;
+  private wasGrounded = true;
+  private landing = 0;
+  private fallSpeed = 0;
 
   constructor() {
     const geo = gorillaGeometry();
     this.root.add(this.body);
     this.hips = pivot(this.body, 0, 1.05, 0);
     this.torso = pivot(this.hips, 0, 0, 0, part(geo.torso, this.material));
-    this.head = pivot(this.torso, 0, 1.0, 0.3, part(geo.head, this.material));
+    this.headMesh = part(geo.head, this.material);
+    this.head = pivot(this.torso, 0, 1.0, 0.3, this.headMesh);
     [-1, 1].forEach((side, i) => {
       const upper = pivot(this.torso, side * 0.88, 0.85, 0.2, part(geo.upper[i], this.material));
       const fore = pivot(upper, 0, -0.88, 0, part(geo.fore[i], this.material));
@@ -191,6 +220,7 @@ export class GorillaRig {
         { x: 0.2, shin: 0.25 },
       ],
       rate: 14,
+      roar: false,
     };
     const lying = g.state === 'down';
 
@@ -244,6 +274,15 @@ export class GorillaRig {
         const f = forwardOf(g.yaw);
         const forwardSpeed = g.vel.x * f.x + g.vel.z * f.z;
         pose.bodyTilt = Math.max(-0.7, Math.min(0.7, forwardSpeed * 0.045));
+        const p = g.swingPivot;
+        if (p) {
+          // Hang along the rope: the body's up axis points at the pivot.
+          const dx = p.x - g.body.x, dy = Math.max(0.5, p.y - g.body.y), dz = p.z - g.body.z;
+          const lx = Math.cos(g.yaw), lz = -Math.sin(g.yaw);
+          const clamp = (v: number) => Math.max(-1.2, Math.min(1.2, v));
+          pose.bodyTilt = clamp(Math.atan2(dx * f.x + dz * f.z, dy));
+          pose.bodyRoll = clamp(-Math.atan2(dx * lx + dz * lz, dy));
+        }
         pose.torsoPitch = 0.05;
         pose.arm[1] = { x: -3.05, z: 0.1, fore: 0 };
         pose.arm[0] = { x: -1.2, z: 0.9, fore: -0.5 };
@@ -280,6 +319,35 @@ export class GorillaRig {
     // Slapped while down: the head snaps sideways.
     if (time - g.lastSlappedTime < 0.25) pose.headZ += 0.6 * Math.sin(((time - g.lastSlappedTime) / 0.25) * Math.PI);
 
+    // Bank into turns while running.
+    let yawRate = 0;
+    if (dt > 0) {
+      let d = g.yaw - this.lastYaw;
+      d = Math.atan2(Math.sin(d), Math.cos(d));
+      yawRate = d / dt;
+    }
+    this.lastYaw = g.yaw;
+    const banking = g.state === 'ground' && g.body.onGround ? Math.max(-0.35, Math.min(0.35, -yawRate * amp * 0.06)) : 0;
+    this.bank = damp(this.bank, banking, 8, dt);
+    pose.bodyRoll += this.bank;
+
+    // Land with a squash: hips drop, arms brace.
+    const grounded = g.body.onGround || g.state !== 'ground';
+    if (grounded && !this.wasGrounded) this.landing = Math.min(1, 0.4 + this.fallSpeed * 0.06);
+    this.wasGrounded = grounded;
+    this.fallSpeed = Math.max(0, -g.vel.y);
+    if (this.landing > 0) {
+      pose.hipsY -= 0.4 * this.landing;
+      pose.torsoPitch += 0.35 * this.landing;
+      pose.leg[0].shin += 0.9 * this.landing;
+      pose.leg[1].shin += 0.9 * this.landing;
+      pose.leg[0].x -= 0.5 * this.landing;
+      pose.leg[1].x -= 0.5 * this.landing;
+      pose.arm[0].fore += 0.4 * this.landing;
+      pose.arm[1].fore += 0.4 * this.landing;
+      this.landing = Math.max(0, this.landing - dt * 4);
+    }
+
     this.lieAmount = damp(this.lieAmount, lying ? 1 : 0, 8, dt);
     pose.bodyTilt -= this.lieAmount * (Math.PI / 2);
     return pose;
@@ -287,6 +355,8 @@ export class GorillaRig {
 
   private applyPose(pose: GorillaPose, yaw: number, dt: number): void {
     const k = pose.rate;
+    const geo = gorillaGeometry();
+    this.headMesh.geometry = pose.roar ? geo.roarHead : geo.head;
     this.yawOffset = pose.rate > 20 ? pose.yawOffset : damp(this.yawOffset, pose.yawOffset, 10, dt);
     this.root.rotation.y = yaw + this.yawOffset;
     this.body.rotation.x = damp(this.body.rotation.x, pose.bodyTilt, k, dt);
@@ -315,6 +385,8 @@ const BOOT = 0x5a3b22, BELT = 0x4a3420, HELMET = 0xe2d6b0, BAND = 0x8a6a3a, MOUS
 interface HunterGeometry {
   torso: THREE.BufferGeometry;
   head: THREE.BufferGeometry;
+  /** Eyes wide, mouth open: held by a gorilla. */
+  screamHead: THREE.BufferGeometry;
   helmet: THREE.BufferGeometry;
   upper: THREE.BufferGeometry;
   fore: THREE.BufferGeometry;
@@ -337,6 +409,14 @@ function hunterGeometry(): HunterGeometry {
     head: buildVoxelPart(5, 5, 5, HV, (x, y, z) => {
       if (z === 4 && y === 2 && (x === 1 || x === 3)) return 0x1a1a1a; // eyes
       if (z === 4 && y === 1 && x >= 1 && x <= 3) return MOUSTACHE;
+      return SKIN_H;
+    }, [2.5, 0, 2.5]),
+    screamHead: buildVoxelPart(5, 5, 5, HV, (x, y, z) => {
+      if (z !== 4) return SKIN_H;
+      if (y === 3 && (x === 1 || x === 3)) return 0xffffff;
+      if (y === 2 && (x === 1 || x === 3)) return 0x1a1a1a;
+      if (y === 2 && x === 2) return MOUSTACHE;
+      if (y <= 1 && x >= 1 && x <= 3) return y === 0 && x === 2 ? 0xb03040 : 0x2a0a0a; // screaming mouth
       return SKIN_H;
     }, [2.5, 0, 2.5]),
     helmet: buildVoxelPart(7, 4, 7, HV, (x, y, z) => {
@@ -372,15 +452,18 @@ export class HunterRig {
   readonly arms: { upper: THREE.Group; fore: THREE.Group }[] = [];
   readonly legs: { thigh: THREE.Group; shin: THREE.Group }[] = [];
   private readonly material = new THREE.MeshLambertMaterial({ vertexColors: true });
+  private readonly headMesh: THREE.Mesh;
   private recoil = 0;
   private spin = 0;
 
   constructor() {
     const geo = hunterGeometry();
     this.root.add(this.body);
+    this.root.scale.setScalar(config.hunter.scale);
     this.hips = pivot(this.body, 0, 0.9, 0);
     this.torso = pivot(this.hips, 0, 0, 0, part(geo.torso, this.material));
-    this.head = pivot(this.torso, 0, 8 * HV + 0.03, 0, part(geo.head, this.material));
+    this.headMesh = part(geo.head, this.material);
+    this.head = pivot(this.torso, 0, 8 * HV + 0.03, 0, this.headMesh);
     this.helmet = pivot(this.head, 0, 4 * HV, 0, part(geo.helmet, this.material));
     for (const side of [-1, 1]) {
       const upper = pivot(this.torso, side * 0.33, 0.57, 0, part(geo.upper, this.material));
@@ -404,20 +487,29 @@ export class HunterRig {
 
     const speed = Math.hypot(h.vel.x, h.vel.z);
     const amp = Math.min(1, speed / 6.5);
-    const phase = (h.stride / 1.7) * Math.PI * 2;
+    // Split velocity into the hunter's own frame so strafing and backpedalling step correctly.
+    const fw = forwardOf(h.yaw);
+    const along = speed > 0.1 ? (h.vel.x * fw.x + h.vel.z * fw.z) / speed : 1;
+    const side = speed > 0.1 ? (h.vel.x * Math.cos(h.yaw) - h.vel.z * Math.sin(h.yaw)) / speed : 0;
+    const dir = along < -0.3 ? -1 : 1;
+    const phase = (h.stride / (h.sprinting ? 1.9 : 1.5)) * Math.PI * 2 * dir;
     const s = Math.sin(phase);
     const k = 16;
+    const stepAmp = amp * (0.35 + 0.65 * Math.abs(along));
 
-    let torsoPitch = 0.05 + amp * 0.12, headX = 0;
-    const hipsY = 0.9 + Math.abs(Math.cos(phase)) * 0.06 * amp;
+    let torsoPitch = 0.05 + amp * along * (h.sprinting ? 0.22 : 0.1), headX = -Math.abs(Math.sin(phase)) * 0.05 * amp;
+    const hipsY = 0.9 + Math.abs(Math.cos(phase)) * 0.07 * amp - (h.sprinting ? 0.04 : 0);
+    const torsoRoll = -side * amp * 0.12 + Math.sin(phase) * 0.04 * amp;
     const arm = [
       { x: -0.9, z: 0.2, fore: -1.1 },
       { x: -0.7, z: -0.2, fore: -1.3 },
     ];
     const leg = [
-      { x: s * 0.75 * amp, shin: Math.max(0, -Math.cos(phase)) * 1.0 * amp },
-      { x: -s * 0.75 * amp, shin: Math.max(0, Math.cos(phase)) * 1.0 * amp },
+      { x: s * 0.8 * stepAmp, shin: Math.max(0, -Math.cos(phase)) * 1.1 * amp },
+      { x: -s * 0.8 * stepAmp, shin: Math.max(0, Math.cos(phase)) * 1.1 * amp },
     ];
+    // Strafing: legs swing out to the side instead.
+    const legZ = [Math.max(0, s) * side * 0.35 * amp, Math.max(0, -s) * side * 0.35 * amp];
     let rifle = { x: 0.05, y: 0.42, z: 0.24, rx: 0, ry: -1.0 };
 
     if (!h.body.onGround) {
@@ -448,6 +540,7 @@ export class HunterRig {
 
     this.hips.position.y = damp(this.hips.position.y, hipsY, k, dt);
     this.torso.rotation.x = damp(this.torso.rotation.x, torsoPitch, k, dt);
+    this.torso.rotation.z = damp(this.torso.rotation.z, torsoRoll, k, dt);
     this.head.rotation.x = damp(this.head.rotation.x, headX, k, dt);
     this.head.rotation.y = Math.sin(time * 0.8 + h.id) * 0.12 * (1 - amp);
     for (let i = 0; i < 2; i++) {
@@ -456,10 +549,16 @@ export class HunterRig {
       this.arms[i].fore.rotation.x = damp(this.arms[i].fore.rotation.x, arm[i].fore, k, dt);
       this.legs[i].thigh.rotation.x = damp(this.legs[i].thigh.rotation.x, leg[i].x, k * 1.5, dt);
       this.legs[i].shin.rotation.x = damp(this.legs[i].shin.rotation.x, leg[i].shin, k * 1.5, dt);
+      this.legs[i].thigh.rotation.z = damp(this.legs[i].thigh.rotation.z, -legZ[i], k, dt);
     }
     this.rifle.position.set(damp(this.rifle.position.x, rifle.x, k, dt), damp(this.rifle.position.y, rifle.y, k, dt), damp(this.rifle.position.z, rifle.z, k, dt));
     this.rifle.rotation.x = damp(this.rifle.rotation.x, rifle.rx - this.recoil * 0.6, k, dt);
     this.rifle.rotation.y = damp(this.rifle.rotation.y, rifle.ry, k, dt);
+  }
+
+  setScream(on: boolean): void {
+    const geo = hunterGeometry();
+    this.headMesh.geometry = on ? geo.screamHead : geo.head;
   }
 
   /** Panicked flailing for a victim held by a gorilla. */

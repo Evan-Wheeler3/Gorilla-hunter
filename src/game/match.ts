@@ -216,7 +216,7 @@ export class Match {
     let finisherStarted = false;
     for (const h of this.hunters.values()) {
       if (h.dead) continue;
-      const d = Math.hypot(h.body.x - cx, h.body.y + 0.9 - cy, h.body.z - cz);
+      const d = Math.hypot(h.body.x - cx, h.body.y + h.body.height / 2 - cy, h.body.z - cz);
       if (d > radius + h.body.halfWidth) continue;
       h.kill(this.ctx.time);
       let pick = this.finishers.pick(g.id, g.rage);
