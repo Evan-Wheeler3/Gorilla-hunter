@@ -7,7 +7,23 @@ const app = document.getElementById('app')!;
 let island: Island | null = null;
 let game: Game | null = null;
 const isTouch = matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
-let quality: 'high' | 'low' = (localStorage.getItem('pr-quality') as 'high' | 'low' | null) ?? (isTouch ? 'low' : 'high');
+const storage = {
+  get(key: string): string | null {
+    try {
+      return localStorage.getItem(key);
+    } catch {
+      return null;
+    }
+  },
+  set(key: string, value: string): void {
+    try {
+      localStorage.setItem(key, value);
+    } catch {
+      /* storage blocked: the setting just won't be remembered */
+    }
+  },
+};
+let quality: 'high' | 'low' = (storage.get('pr-quality') as 'high' | 'low' | null) ?? (isTouch ? 'low' : 'high');
 
 const nextFrame = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
 
@@ -60,7 +76,7 @@ function showMenu(): void {
   app.querySelectorAll<HTMLButtonElement>('[data-play]').forEach((b) => (b.onclick = () => startPractice(b.dataset.play as Team)));
   app.querySelector<HTMLButtonElement>('.quality')!.onclick = () => {
     quality = quality === 'high' ? 'low' : 'high';
-    localStorage.setItem('pr-quality', quality);
+    storage.set('pr-quality', quality);
     showMenu();
   };
 }
