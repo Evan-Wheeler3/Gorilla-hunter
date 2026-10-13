@@ -1,5 +1,11 @@
 # Design changes from the original doc
 
+## Platform (owner decision)
+
+Browser game for phones and desktop, friends join by sharing a code; no Steam, no dedicated
+servers. The Unity/C# build was replaced by TypeScript + three.js (it remains in git history).
+The island shrank to 128 m for 4 players, with a boat on every shore.
+
 Owner decisions that override the "Primal Raid: Full Game Design & Build Plan" doc. All numbers
 live in `GameConfig` and are starting points for playtests.
 
@@ -7,13 +13,13 @@ live in `GameConfig` and are starting points for playtests.
 
 | Rule | Doc | Now |
 | --- | --- | --- |
-| Starting teams | gorillas = ceil(players / 4), the rest hunters | hunters = ceil(players / 5), the rest gorillas (10 players = 2 hunters v 8 gorillas) |
+| Starting teams | gorillas = ceil(players / 4), the rest hunters | hunters = ceil(players / 5), the rest gorillas (4 players = 1 hunter v 3 gorillas) |
 | Captured gorilla | becomes a spectator | becomes a hunter |
 | Dead hunter | spectates | respawns at camp after 5 s while the team's shared pool has lives (100 lives) |
 | Hunters win | all gorillas secured | every gorilla converted |
 | Gorillas win | all hunters dead, or timer | timer runs out, or the life pool is empty and every hunter is dead |
 | Last gorilla | — | permanent rage mode |
-| Boats | 1, east shore | 4, one per shore (tested: worst trip ~158 m, ~30 s at sprint with detours, inside the 37.5 s window) |
+| Boats | 1, east shore | 4, one per shore (tested: every point on the island is within the dragging window) |
 | Round length | 12:00, fire at 6:00 | 10:00, fire at 5:00 |
 
 Status: the rules are unit tested (`Core/Match/InfectionRound.cs`, `TeamAssignment.cs`) and

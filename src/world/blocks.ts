@@ -31,7 +31,7 @@ const def = (b: Block, color: [number, number, number], jitter: number, climbabl
   (info[b] = { color, jitter, climbable });
 
 def(Block.Air, [0, 0, 0], 0);
-def(Block.Grass, [0.36, 0.66, 0.24], 0.08);
+def(Block.Grass, [0.33, 0.55, 0.22], 0.09);
 def(Block.Dirt, [0.48, 0.33, 0.2], 0.06);
 def(Block.Sand, [0.9, 0.82, 0.58], 0.05);
 def(Block.Stone, [0.5, 0.5, 0.5], 0.06);
@@ -45,7 +45,7 @@ def(Block.Hull, [0.55, 0.3, 0.18], 0.04);
 def(Block.Rock, [0.55, 0.54, 0.52], 0.07);
 def(Block.Cloth, [0.85, 0.78, 0.6], 0.03);
 def(Block.Crate, [0.7, 0.52, 0.3], 0.05);
-def(Block.Flower, [0.95, 0.35, 0.45], 0.15);
+def(Block.Flower, [0.98, 0.86, 0.38], 0.2);
 
 export function blockInfo(b: number): BlockInfo {
   return info[b] ?? info[Block.Stone];

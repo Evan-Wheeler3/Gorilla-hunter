@@ -1,0 +1,276 @@
+import * as THREE from 'three';
+import type { FinisherPick } from '../core/finishers';
+import { Rng } from '../core/rng';
+import type { Dart } from '../game/match';
+import type { VoxelWorld } from '../world/voxelWorld';
+import { HUNTER_DEBRIS_COLORS } from './characters';
+
+interface Particle {
+  x: number;
+  y: number;
+  z: number;
+  vx: number;
+  vy: number;
+  vz: number;
+  rx: number;
+  ry: number;
+  spin: number;
+  size: number;
+  life: number;
+  maxLife: number;
+  color: THREE.Color;
+  bounce: number;
+  gravity: number;
+}
+
+const MAX_PARTICLES = 1500;
+
+/**
+ * Pooled voxel particles (kill debris, dust, dart puffs, slap stars, conversion confetti) plus
+ * dart meshes. Everything is one instanced draw call, so it stays cheap on phones.
+ */
+export class Effects {
+  private readonly cubes: THREE.InstancedMesh;
+  private readonly particles: Particle[] = [];
+  private readonly dartMeshes: THREE.Mesh[] = [];
+  private readonly dartGeo = new THREE.BoxGeometry(0.06, 0.06, 0.4);
+  private readonly dartMat = new THREE.MeshLambertMaterial({ color: 0xff4fa0, emissive: 0x551030 });
+  private readonly m4 = new THREE.Matrix4();
+  private readonly q = new THREE.Quaternion();
+  private readonly e = new THREE.Euler();
+  private readonly v = new THREE.Vector3();
+  private readonly sv = new THREE.Vector3();
+  /** Camera shake strength, decays over time. */
+  shake = 0;
+
+  constructor(
+    private readonly scene: THREE.Scene,
+    private readonly world: VoxelWorld,
+  ) {
+    this.cubes = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshLambertMaterial(), MAX_PARTICLES);
+    this.cubes.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.cubes.castShadow = true;
+    this.cubes.frustumCulled = false;
+    this.cubes.count = 0;
+    // Allocate the per-instance colour buffer up front.
+    this.cubes.setColorAt(0, new THREE.Color());
+    scene.add(this.cubes);
+  }
+
+  private spawn(p: Partial<Omit<Particle, 'color'>> & { x: number; y: number; z: number; color: number | THREE.Color }): void {
+    if (this.particles.length >= MAX_PARTICLES) this.particles.shift();
+    const life = p.life ?? 6;
+    this.particles.push({
+      vx: 0,
+      vy: 0,
+      vz: 0,
+      rx: Math.random() * 6,
+      ry: Math.random() * 6,
+      spin: (Math.random() - 0.5) * 12,
+      size: 0.12,
+      bounce: 0.35,
+      gravity: 20,
+      maxLife: life,
+      ...p,
+      life,
+      color: p.color instanceof THREE.Color ? p.color : new THREE.Color(p.color),
+    });
+  }
+
+  /**
+   * A hunter bursts into voxel chunks. Each finisher throws the pieces its own way, seeded so
+   * every player sees the same result.
+   */
+  hunterKilled(at: { x: number; y: number; z: number }, gorillaYaw: number, pick: FinisherPick): void {
+    const rng = new Rng(pick.seed);
+    const fx = Math.sin(gorillaYaw), fz = Math.cos(gorillaYaw);
+    const sx = -fz, sz = fx; // sideways
+    const id = pick.finisher.id;
+    const count = id === 'drum_solo' ? 160 : 110;
+    for (let i = 0; i < count; i++) {
+      const color = HUNTER_DEBRIS_COLORS[rng.int(HUNTER_DEBRIS_COLORS.length)];
+      const h = rng.range(0, 1.8);
+      let vx = rng.range(-3, 3), vy = rng.range(2, 7), vz = rng.range(-3, 3);
+      switch (id) {
+        case 'rip_in_half': {
+          const side = i % 2 === 0 ? 1 : -1;
+          vx = sx * side * rng.range(5, 9) + fx * 2;
+          vz = sz * side * rng.range(5, 9) + fz * 2;
+          vy = rng.range(3, 6);
+          break;
+        }
+        case 'head_pop':
+        case 'head_clap':
+          if (h > 1.3) vy = rng.range(10, 16);
+          break;
+        case 'twirl_and_throw':
+          vx = fx * rng.range(12, 18) + rng.range(-1, 1);
+          vz = fz * rng.range(12, 18) + rng.range(-1, 1);
+          vy = rng.range(8, 12);
+          break;
+        case 'crumple_ball':
+          vx = fx * rng.range(6, 8);
+          vz = fz * rng.range(6, 8);
+          vy = rng.range(0, 2);
+          break;
+        case 'ragdoll_slam':
+          vy = rng.range(-2, 1);
+          vx = rng.range(-8, 8);
+          vz = rng.range(-8, 8);
+          break;
+        case 'drum_solo':
+          vy = rng.range(6, 15);
+          vx = rng.range(-6, 6);
+          vz = rng.range(-6, 6);
+          break;
+      }
+      this.spawn({
+        x: at.x + rng.range(-0.3, 0.3),
+        y: at.y + h,
+        z: at.z + rng.range(-0.3, 0.3),
+        vx,
+        vy,
+        vz,
+        size: rng.range(0.14, 0.32),
+        color,
+        life: rng.range(5, 8),
+      });
+    }
+    this.shake = Math.max(this.shake, 0.6);
+  }
+
+  dartHit(at: { x: number; y: number; z: number }, onGorilla: boolean): void {
+    for (let i = 0; i < (onGorilla ? 18 : 6); i++)
+      this.spawn({
+        x: at.x,
+        y: at.y,
+        z: at.z,
+        vx: (Math.random() - 0.5) * 4,
+        vy: Math.random() * 4,
+        vz: (Math.random() - 0.5) * 4,
+        size: 0.07,
+        color: onGorilla ? 0xff6fb5 : 0xd9cfae,
+        life: 0.8,
+        gravity: 8,
+      });
+  }
+
+  knockout(at: { x: number; y: number; z: number }): void {
+    for (let i = 0; i < 24; i++) {
+      const a = (i / 24) * Math.PI * 2;
+      this.spawn({ x: at.x, y: at.y + 0.3, z: at.z, vx: Math.cos(a) * 5, vy: 1.5, vz: Math.sin(a) * 5, size: 0.14, color: 0xcfc2a5, life: 0.9, gravity: 4 });
+    }
+    this.shake = Math.max(this.shake, 0.25);
+  }
+
+  slap(at: { x: number; y: number; z: number }): void {
+    for (let i = 0; i < 10; i++)
+      this.spawn({
+        x: at.x,
+        y: at.y + 1,
+        z: at.z,
+        vx: (Math.random() - 0.5) * 5,
+        vy: 3 + Math.random() * 3,
+        vz: (Math.random() - 0.5) * 5,
+        size: 0.13,
+        color: 0xfff27a,
+        life: 0.7,
+        gravity: 6,
+      });
+  }
+
+  /** Little "z" puffs over a knocked-out gorilla. */
+  sleepPuff(at: { x: number; y: number; z: number }): void {
+    this.spawn({ x: at.x + (Math.random() - 0.5), y: at.y + 1.2, z: at.z, vy: 0.8, vx: 0.3, size: 0.12, color: 0xffffff, life: 1.4, gravity: -0.2 });
+  }
+
+  confetti(at: { x: number; y: number; z: number }): void {
+    const colors = [0xffd34d, 0xff6a13, 0x6fd3ff, 0xff4fa0, 0x8cff6a];
+    for (let i = 0; i < 80; i++)
+      this.spawn({
+        x: at.x,
+        y: at.y + 1,
+        z: at.z,
+        vx: (Math.random() - 0.5) * 8,
+        vy: 6 + Math.random() * 8,
+        vz: (Math.random() - 0.5) * 8,
+        size: 0.1,
+        color: colors[i % colors.length],
+        life: 3,
+        gravity: 7,
+      });
+  }
+
+  dust(at: { x: number; y: number; z: number }, amount = 2): void {
+    for (let i = 0; i < amount; i++)
+      this.spawn({
+        x: at.x + (Math.random() - 0.5) * 0.6,
+        y: at.y + 0.05,
+        z: at.z + (Math.random() - 0.5) * 0.6,
+        vx: (Math.random() - 0.5) * 1.2,
+        vy: 0.6 + Math.random(),
+        vz: (Math.random() - 0.5) * 1.2,
+        size: 0.1 + Math.random() * 0.08,
+        color: 0xc9b48a,
+        life: 0.6,
+        gravity: 1,
+      });
+  }
+
+  update(dt: number, darts: Dart[]): void {
+    this.shake = Math.max(0, this.shake - dt * 1.8);
+    let n = 0;
+    for (let i = this.particles.length - 1; i >= 0; i--) {
+      const p = this.particles[i];
+      p.life -= dt;
+      if (p.life <= 0) {
+        this.particles.splice(i, 1);
+        continue;
+      }
+      p.vy -= p.gravity * dt;
+      const nx = p.x + p.vx * dt, ny = p.y + p.vy * dt, nz = p.z + p.vz * dt;
+      if (this.world.solidAt(nx, ny - p.size / 2, nz)) {
+        // Bounce off the ground; scrape to a stop.
+        if (!this.world.solidAt(nx, p.y, nz)) {
+          p.vy = -p.vy * p.bounce;
+          p.vx *= 0.6;
+          p.vz *= 0.6;
+          p.spin *= 0.5;
+        } else {
+          p.vx = -p.vx * 0.3;
+          p.vz = -p.vz * 0.3;
+        }
+      } else {
+        p.x = nx;
+        p.y = ny;
+        p.z = nz;
+      }
+      p.rx += p.spin * dt;
+      p.ry += p.spin * 0.7 * dt;
+      const fade = Math.min(1, p.life / Math.min(1, p.maxLife * 0.3));
+      const s = p.size * fade;
+      this.q.setFromEuler(this.e.set(p.rx, p.ry, 0));
+      this.m4.compose(this.v.set(p.x, p.y, p.z), this.q, this.sv.set(s, s, s));
+      this.cubes.setMatrixAt(n, this.m4);
+      this.cubes.setColorAt(n, p.color);
+      n++;
+    }
+    this.cubes.count = n;
+    this.cubes.instanceMatrix.needsUpdate = true;
+    if (this.cubes.instanceColor) this.cubes.instanceColor.needsUpdate = true;
+
+    // Darts: one mesh each, pointing along their flight.
+    while (this.dartMeshes.length < darts.length) {
+      const m = new THREE.Mesh(this.dartGeo, this.dartMat);
+      this.scene.add(m);
+      this.dartMeshes.push(m);
+    }
+    this.dartMeshes.forEach((m, i) => {
+      const d = darts[i];
+      m.visible = !!d;
+      if (!d) return;
+      m.position.set(d.x, d.y, d.z);
+      if (!d.stuck) m.lookAt(d.x + d.vx, d.y + d.vy, d.z + d.vz);
+    });
+  }
+}

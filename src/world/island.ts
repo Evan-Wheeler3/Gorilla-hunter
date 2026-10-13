@@ -95,7 +95,7 @@ export function generateIsland(seed = 1234): Island {
         world.set(ix, iy, iz, b);
       }
       // Speckle the grass with flowers.
-      if (!sand && detail.sample(ix * 0.9, iz * 0.9) > 0.82) world.set(ix, top - 1, iz, Block.Flower);
+      if (!sand && detail.sample(ix * 1.7, iz * 1.7) > 0.9) world.set(ix, top - 1, iz, Block.Flower);
     }
   }
 

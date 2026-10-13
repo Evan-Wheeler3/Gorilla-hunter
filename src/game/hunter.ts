@@ -70,8 +70,9 @@ export class Hunter {
 
   /** Point behind the hunter that a dragged body is pulled toward. */
   get dragAnchor(): Vec3 {
-    const f = forwardOf(this.yaw);
-    return { x: this.body.x - f.x * H.dragDistance, y: this.body.y, z: this.body.z - f.z * H.dragDistance };
+    const f = forwardOf(this.yaw), r = rightOf(this.yaw);
+    const back = H.dragDistance * 0.85, side = -1.2; // behind and to the left, clear of the over-shoulder camera
+    return { x: this.body.x - f.x * back + r.x * side, y: this.body.y, z: this.body.z - f.z * back + r.z * side };
   }
 
   /** Muzzle position: right shoulder, slightly ahead. */

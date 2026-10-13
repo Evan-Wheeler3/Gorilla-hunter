@@ -1,0 +1,467 @@
+:root {
+  --jungle: #1b2a1b;
+  --leaf: #4caf50;
+  --sun: #ffd34d;
+  --vest: #ff6a13;
+  --ink: #fffaf0;
+  --shadow: 0 2px 0 rgba(0, 0, 0, 0.35), 0 0 12px rgba(0, 0, 0, 0.35);
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body,
+#app {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--jungle);
+  color: var(--ink);
+  font-family: 'Nunito', system-ui, sans-serif;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+  overscroll-behavior: none;
+}
+
+.game-canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* ---------------------------------------------------------------- menu */
+
+.menu,
+.loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 24px 16px;
+  background:
+    radial-gradient(ellipse at 50% 30%, rgba(255, 211, 77, 0.25), transparent 60%),
+    linear-gradient(#2f5b2f, #142114);
+  text-align: center;
+}
+
+.logo {
+  font-family: 'Lilita One', 'Nunito', sans-serif;
+  font-size: clamp(48px, 13vw, 110px);
+  letter-spacing: 2px;
+  color: var(--sun);
+  text-shadow: 0 6px 0 #7a4a12, 0 10px 24px rgba(0, 0, 0, 0.5);
+  transform: rotate(-3deg);
+  line-height: 1;
+}
+
+.tagline {
+  margin: 0;
+  max-width: 520px;
+  font-size: 17px;
+  opacity: 0.9;
+}
+
+.menu-buttons {
+  display: grid;
+  gap: 10px;
+  width: min(360px, 100%);
+}
+
+.btn {
+  font: 800 19px 'Nunito', sans-serif;
+  padding: 14px 18px;
+  border: 0;
+  border-radius: 14px;
+  color: #2a1a05;
+  background: linear-gradient(#ffe27a, #ffb52e);
+  box-shadow: 0 5px 0 #a8650f;
+  cursor: pointer;
+  transition: transform 0.08s;
+}
+
+.btn:active {
+  transform: translateY(3px);
+  box-shadow: 0 2px 0 #a8650f;
+}
+
+.btn.secondary {
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--ink);
+  box-shadow: 0 5px 0 rgba(0, 0, 0, 0.3);
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.quality {
+  background: none;
+  border: 0;
+  color: var(--ink);
+  opacity: 0.75;
+  font: 600 15px 'Nunito', sans-serif;
+  cursor: pointer;
+}
+
+.howto {
+  max-width: 560px;
+  font-size: 13px;
+  opacity: 0.7;
+}
+
+/* ---------------------------------------------------------------- HUD */
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.overlay.touch {
+  pointer-events: auto;
+}
+
+.hud {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  text-shadow: var(--shadow);
+}
+
+.round-bar {
+  position: absolute;
+  top: max(10px, env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  padding: 6px 16px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.45);
+  font-weight: 800;
+  font-size: 17px;
+  white-space: nowrap;
+}
+
+.round-bar .clock {
+  font-family: 'Lilita One', sans-serif;
+  font-size: 22px;
+  color: var(--sun);
+}
+
+.announce {
+  position: absolute;
+  top: 64px;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-weight: 800;
+  font-size: clamp(16px, 2.6vw, 24px);
+  padding: 0 16px;
+  transition: opacity 0.3s;
+}
+
+.center-msg {
+  position: absolute;
+  top: 34%;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-family: 'Lilita One', sans-serif;
+  font-size: clamp(26px, 5vw, 44px);
+  color: #fff;
+}
+
+.prompt {
+  position: absolute;
+  bottom: 22%;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-weight: 800;
+  font-size: clamp(15px, 2.2vw, 20px);
+  padding: 0 16px;
+}
+
+.hint {
+  position: absolute;
+  bottom: 12px;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-size: 14px;
+  opacity: 0.8;
+}
+
+.crosshair {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 44px;
+  height: 44px;
+  transform: translate(-50%, -50%);
+}
+
+.crosshair svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.crosshair path {
+  stroke: #fff;
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.8));
+}
+
+.crosshair .ring-bg {
+  fill: none;
+  stroke: rgba(0, 0, 0, 0.3);
+  stroke-width: 3;
+}
+
+.crosshair .ring {
+  fill: none;
+  stroke: #6fd3ff;
+  stroke-width: 3;
+  transform: rotate(-90deg);
+  transform-origin: 20px 20px;
+}
+
+.crosshair.loaded .ring {
+  stroke: #ff4fa0;
+}
+
+.crosshair.aiming {
+  width: 34px;
+  height: 34px;
+}
+
+.stamina {
+  position: absolute;
+  bottom: max(44px, env(safe-area-inset-bottom));
+  left: 50%;
+  width: min(320px, 50vw);
+  height: 14px;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+
+.stamina .fill {
+  height: 100%;
+  background: linear-gradient(90deg, #ffcf3d, #ffe98a);
+  transition: width 0.1s;
+}
+
+.stamina.rage .fill {
+  background: linear-gradient(90deg, #ff3b2a, #ff9a3d);
+}
+
+.vignette {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at center, transparent 45%, rgba(70, 0, 60, 0.85));
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.boat-arrow {
+  position: absolute;
+  left: 0;
+  top: 0;
+  font-size: 30px;
+  font-weight: 800;
+  color: var(--sun);
+  white-space: nowrap;
+}
+
+.labels .label {
+  position: absolute;
+  left: 0;
+  top: 0;
+  font-weight: 800;
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+.label.down {
+  color: #ffb3e0;
+  font-size: 16px;
+}
+
+.label.hunter {
+  color: var(--vest);
+}
+
+.label.gorilla.rage {
+  color: #ff5a4a;
+}
+
+.finisher {
+  position: absolute;
+  top: 20%;
+  left: 0;
+  right: 0;
+  text-align: center;
+}
+
+.finisher .name {
+  font-family: 'Lilita One', sans-serif;
+  font-size: clamp(36px, 8vw, 72px);
+  color: #fff;
+  text-shadow: 0 5px 0 #8a1f2a, 0 10px 30px rgba(0, 0, 0, 0.5);
+}
+
+.finisher .rarity {
+  font-weight: 800;
+  letter-spacing: 3px;
+  font-size: 15px;
+}
+
+.rarity.common { color: #e6e6e6; }
+.rarity.uncommon { color: #6fe36f; }
+.rarity.rare { color: #6fb7ff; }
+.rarity.legendary { color: #ffb52e; }
+
+.finisher.pop {
+  animation: pop 2.2s ease-out forwards;
+}
+
+@keyframes pop {
+  0% { transform: scale(2.2) rotate(-6deg); opacity: 0; }
+  12% { transform: scale(0.95) rotate(-3deg); opacity: 1; }
+  20% { transform: scale(1.05) rotate(-3deg); }
+  80% { opacity: 1; }
+  100% { transform: scale(1) rotate(-3deg); opacity: 0; }
+}
+
+.results {
+  position: absolute;
+  inset: 0;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background: rgba(10, 20, 10, 0.72);
+  pointer-events: auto;
+}
+
+.results h1 {
+  margin: 0;
+  font-family: 'Lilita One', sans-serif;
+  font-size: clamp(40px, 9vw, 80px);
+  color: var(--sun);
+}
+
+.overlay.touch .stamina {
+  top: calc(max(10px, env(safe-area-inset-top)) + 46px);
+  bottom: auto;
+  height: 10px;
+}
+
+.overlay.touch .prompt {
+  bottom: auto;
+  top: 58%;
+}
+
+/* ---------------------------------------------------------------- touch controls */
+
+.stick-base,
+.touch-btn {
+  display: none;
+}
+
+.overlay.touch .stick-base {
+  display: block;
+  position: absolute;
+  left: 22%;
+  top: 72%;
+  width: 120px;
+  height: 120px;
+  margin: -60px 0 0 -60px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.12);
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  opacity: 0.55;
+}
+
+.overlay.touch .stick-base.active {
+  opacity: 1;
+}
+
+.stick-knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 54px;
+  height: 54px;
+  margin: -27px 0 0 -27px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.overlay.touch .touch-btn {
+  display: flex;
+  position: absolute;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  white-space: pre-line;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.35);
+  border: 2px solid rgba(255, 255, 255, 0.45);
+  color: #fff;
+  font: 800 13px 'Nunito', sans-serif;
+  line-height: 1.1;
+  text-shadow: none;
+}
+
+.touch-btn.down {
+  background: rgba(255, 211, 77, 0.55);
+}
+
+.btn-action {
+  right: max(24px, env(safe-area-inset-right));
+  bottom: max(34px, env(safe-area-inset-bottom));
+  width: 92px;
+  height: 92px;
+  font-size: 15px !important;
+}
+
+.btn-jump {
+  right: max(128px, calc(env(safe-area-inset-right) + 104px));
+  bottom: max(24px, env(safe-area-inset-bottom));
+  width: 66px;
+  height: 66px;
+}
+
+.btn-grab,
+.btn-dash {
+  right: max(36px, env(safe-area-inset-right));
+  bottom: 140px;
+  width: 66px;
+  height: 66px;
+}
+
+.btn-aim {
+  right: 120px;
+  bottom: 110px;
+  width: 58px;
+  height: 58px;
+}
