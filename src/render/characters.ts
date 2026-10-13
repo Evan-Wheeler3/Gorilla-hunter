@@ -244,7 +244,13 @@ export class GorillaRig {
           pose.torsoPitch = 0.5 + 0.2 * amp;
           pose.hipsY = 1.05 + Math.abs(Math.sin(phase)) * 0.14 * amp;
           pose.bodyRoll = Math.sin(phase) * 0.05 * amp;
-          if (g.dashing) pose.torsoPitch = 0.95;
+          if (g.dashing) {
+            // Shoulder charge: head down, arms swept forward, roaring.
+            pose.torsoPitch = 0.95;
+            pose.arm[0] = { x: -1.2, z: 0.35, fore: -0.7 };
+            pose.arm[1] = { x: -1.2, z: -0.35, fore: -0.7 };
+            pose.roar = true;
+          }
           if (amp < 0.05) {
             pose.headZ = Math.sin(time * 0.7 + g.id) * 0.25;
             pose.hipsY += Math.sin(time * 2.2) * 0.015;

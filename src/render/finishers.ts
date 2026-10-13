@@ -627,6 +627,74 @@ export class FinisherDirector {
     });
   }
 
+  /**
+   * A gorilla dashed straight through a hunter: no lock, the gorilla keeps running and the hunter
+   * comes apart behind it. Seeded variants: torn in half, head knocked off, or burst into limbs.
+   */
+  dashKill(kill: FinisherStart & { dash: { x: number; z: number } }, localId: number): void {
+    const rng = new Rng(kill.pick.seed);
+    const puppet = new HunterRig();
+    this.scene.add(puppet.root);
+    puppet.setScream(true);
+    puppet.root.position.set(kill.at.x, kill.at.y, kill.at.z);
+    puppet.root.rotation.y = Math.atan2(-kill.dash.x, -kill.dash.z); // facing the charge
+    puppet.root.updateMatrixWorld(true);
+    const dir = v3(kill.dash.x, 0, kill.dash.z).normalize();
+    const side = v3(-dir.z, 0, dir.x);
+    const chest = puppet.torso.getWorldPosition(v3()).addScaledVector(UP, 0.4);
+    const fx = this.effects;
+    const spin = (n: number) => v3(rng.range(-n, n), rng.range(-n, n), rng.range(-n, n));
+    const fling = (part: THREE.Object3D, vel: V, n = 10, life = 6) =>
+      fx.addChunk(part, vel, spin(n), { life, radius: part === puppet.root ? 0.35 : 0.15 });
+    const tear = (part: THREE.Object3D, parentDir: V, partDir: V, w = 0.25) => {
+      const parent = part.parent;
+      const cap = (obj: THREE.Object3D, at: V) => {
+        const m = new THREE.Mesh(STUMP_GEO, STUMP_MAT);
+        m.scale.set(w, 0.06, w * 0.8);
+        m.position.copy(at);
+        obj.add(m);
+      };
+      if (parent) {
+        cap(parent, part.position);
+        fx.fountain(parent, part.position, parentDir, 1.5, 6, 90);
+      }
+      cap(part, v3());
+      fx.fountain(part, v3(), partDir, 1.1, 4, 45);
+    };
+    const speed = rng.range(13, 17);
+    // Blood sprays out the way the gorilla went.
+    fx.burst(chest, GORE_COLORS, 70, 6, { x: dir.x * 9, y: 3, z: dir.z * 9 });
+    fx.burst(chest, GORE_COLORS, 30, 9, { x: 0, y: 2, z: 0 }, 0.1);
+
+    const variant = rng.int(3);
+    if (variant === 0) {
+      // Torn in half at the waist: the top half goes with the gorilla, the legs fold over backwards.
+      tear(puppet.torso, v3(0, 1, 0), v3(0, -1, 0), 0.5);
+      fling(puppet.torso, dir.clone().multiplyScalar(speed).addScaledVector(UP, 6).addScaledVector(side, rng.range(-3, 3)), 12);
+      fling(puppet.hips, dir.clone().multiplyScalar(3).addScaledVector(UP, 2), 6);
+      puppet.root.removeFromParent();
+    } else if (variant === 1) {
+      // Head knocked clean off; the body cartwheels away.
+      tear(puppet.head, v3(0, 1, 0), v3(0, -1, 0), 0.3);
+      fling(puppet.head, dir.clone().multiplyScalar(speed + 4).addScaledVector(UP, 9).addScaledVector(side, rng.range(-4, 4)), 16);
+      fling(puppet.root, dir.clone().multiplyScalar(speed * 0.7).addScaledVector(UP, 5), 9);
+      fx.burst(chest.clone().addScaledVector(UP, 0.4), [0xffffff, 0xf4efe0], 6, 5, { x: dir.x * 6, y: 4, z: dir.z * 6 }, 0.08);
+    } else {
+      // Burst apart: every limb scatters ahead of the gorilla.
+      const parts = [puppet.head, puppet.arms[0].upper, puppet.arms[1].upper, puppet.legs[0].thigh, puppet.legs[1].thigh, puppet.torso];
+      const dirs = [v3(0, 1, 0), v3(-1, 0.5, 0), v3(1, 0.5, 0), v3(-0.3, -1, 0), v3(0.3, -1, 0), v3(0, -1, 0)];
+      parts.forEach((part, i) => tear(part, dirs[i], i === 0 ? v3(0, -1, 0) : v3(0, 1, 0), i === 5 ? 0.5 : 0.22));
+      for (const part of parts) {
+        const spread = dir.clone().multiplyScalar(rng.range(speed * 0.5, speed)).addScaledVector(side, rng.range(-6, 6));
+        fling(part, spread.addScaledVector(UP, rng.range(4, 9)), 14);
+      }
+      fx.burst(chest, GORE_COLORS, 90, 10, { x: dir.x * 6, y: 3, z: dir.z * 6 });
+      puppet.root.removeFromParent();
+    }
+    fx.shake = Math.max(fx.shake, 0.5);
+    this.onClimax(kill.killer === localId || kill.victim === localId);
+  }
+
   /** Pose override for a gorilla's rig while its finisher plays (undefined otherwise). */
   poseFor(gorillaId: number): ((p: GorillaPose) => void) | undefined {
     const a = this.active.get(gorillaId);

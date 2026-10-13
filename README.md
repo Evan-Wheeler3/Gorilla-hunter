@@ -37,7 +37,7 @@ One-time setup: repository **Settings → Pages → Build and deployment → Sou
 | Gorilla: swipe (kills a hunter, slaps a downed gorilla awake) | Left click | SWIPE |
 | Gorilla: swing on a vine | Hold left click near a vine knot | Hold SWIPE |
 | Gorilla: climb | Walk into a trunk or temple wall | Same |
-| Gorilla: dash | Shift | DASH |
+| Gorilla: dash (kills any hunter you dash through) | Shift | DASH |
 
 ## Code layout
 

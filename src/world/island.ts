@@ -125,13 +125,14 @@ export function generateIsland(seed = 1234): Island {
     Math.hypot(x - PRACTICE.x, z - PRACTICE.z) < 9 ||
     docks.some((d) => Math.hypot(x - d.zone.x, z - d.zone.z) < 10);
 
-  for (let attempt = 0; attempt < 4000 && placed.length < 120; attempt++) {
+  for (let attempt = 0; attempt < 4000 && placed.length < 95; attempt++) {
     const x = rng.range(-ISLAND_RADIUS, ISLAND_RADIUS), z = rng.range(-ISLAND_RADIUS, ISLAND_RADIUS);
     if (blocked(x, z)) continue;
     // Denser canopy in the north for the gorilla nest.
     const nestBias = z > 15 ? 1 : 0.55;
     if (rng.next() > nestBias) continue;
-    const spacing = z > 15 ? 6 : 7.5;
+    // Wide gaps so the jungle floor stays runnable; the canopies still nearly touch overhead.
+    const spacing = z > 15 ? 8.5 : 10.5;
     if (placed.some((p) => Math.hypot(p.x - x, p.z - z) < spacing)) continue;
     placed.push({ x, z });
     buildTree(world, rng, x, z, z > 15 ? 3 : 0, vines);
@@ -282,7 +283,7 @@ function buildTree(world: VoxelWorld, rng: Rng, x: number, z: number, extra: num
   // Side branches with leafy pads: perches halfway up.
   const branches = 1 + rng.int(3);
   for (let i = 0; i < branches; i++) {
-    const y = ground + height * rng.range(0.4, 0.75);
+    const y = ground + Math.max(6.5, height * rng.range(0.45, 0.75)); // above head height
     const angle = rng.int(4) * (Math.PI / 2);
     const bx = Math.round(Math.cos(angle)), bz = Math.round(Math.sin(angle));
     for (let t = 0.75; t <= 3.5; t += s) world.set(world.ix(cx + bx * t), world.iy(y), world.iz(cz + bz * t), Block.Wood);
@@ -292,7 +293,7 @@ function buildTree(world: VoxelWorld, rng: Rng, x: number, z: number, extra: num
 
   // Long vines hanging from the underside of the crown almost to the ground.
   const a0 = rng.next() * Math.PI * 2;
-  const count = 2 + rng.int(2);
+  const count = 3 + rng.int(2);
   for (let i = 0; i < count; i++) {
     const a = a0 + (i / count) * Math.PI * 2;
     const vx = cx + Math.cos(a) * rx * 0.65, vz = cz + Math.sin(a) * rx * 0.65;

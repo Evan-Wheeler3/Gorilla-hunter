@@ -20,7 +20,7 @@ export interface MatchOptions {
 
 /** Things that happened this step, for effects, sounds and the HUD. */
 export type MatchEffect =
-  | { type: 'kill'; victim: number; killer: number; at: Vec3; killerAt: Vec3; yaw: number; pick: FinisherPick; finisher: boolean }
+  | { type: 'kill'; victim: number; killer: number; at: Vec3; killerAt: Vec3; yaw: number; pick: FinisherPick; finisher: boolean; dash?: { x: number; z: number } }
   | { type: 'dartHit'; target: number | null; at: Vec3 }
   | { type: 'knockout'; gorilla: number }
   | { type: 'slap'; gorilla: number; at: Vec3 }
@@ -141,6 +141,7 @@ export class Match {
       h.held = huntersHeld;
       h.update(inputs.get(h.id) ?? emptyInput(h.yaw), dt, this.ctx);
     }
+    for (const g of this.gorillas.values()) if (g.dashing) this.dashHits(g);
 
     // Dragged bodies follow their hunters; deliveries to a boat convert the gorilla.
     for (const g of [...this.gorillas.values()]) {
@@ -248,6 +249,35 @@ export class Match {
       other.lastSlappedTime = this.ctx.time;
       this.effects.push({ type: 'slap', gorilla: other.id, at: { x: other.body.x, y: other.body.y + 0.6, z: other.body.z } });
       if (other.sedation.slap() === 'woke') this.onGorillaWoke(other);
+    }
+  }
+
+  /** A dashing gorilla ploughs straight through any hunter in its path, killing him without stopping. */
+  private dashHits(g: Gorilla): void {
+    if (g.sedation.isDown || g.inFinisher) return;
+    const dir = g.dashDirection;
+    for (const h of this.hunters.values()) {
+      if (h.dead) continue;
+      const dx = h.body.x - g.body.x, dz = h.body.z - g.body.z;
+      // A little reach in front so a dash aimed at a hunter connects.
+      const ahead = dx * dir.x + dz * dir.z, side = Math.abs(dx * dir.z - dz * dir.x);
+      const reach = g.body.halfWidth + h.body.halfWidth;
+      if (ahead < -reach || ahead > reach + 0.9 || side > reach + 0.2) continue;
+      if (h.body.y > g.body.y + g.body.height || g.body.y > h.body.y + h.body.height) continue;
+      h.kill(this.ctx.time);
+      this.effects.push({
+        type: 'kill',
+        victim: h.id,
+        killer: g.id,
+        at: { x: h.body.x, y: h.body.y, z: h.body.z },
+        killerAt: { x: g.body.x, y: g.body.y, z: g.body.z },
+        yaw: Math.atan2(dir.x, dir.z),
+        // Not a finisher: the seed only varies how he comes apart.
+        pick: { finisher: LAUNCH_FINISHERS[0], seed: (Math.floor(this.ctx.time * 1000) * 31 + h.id * 7919) >>> 0 },
+        finisher: false,
+        dash: { x: dir.x, z: dir.z },
+      });
+      this.round.reportHunterKilled(h.id);
     }
   }
 

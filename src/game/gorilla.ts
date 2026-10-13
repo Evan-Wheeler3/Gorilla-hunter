@@ -85,6 +85,10 @@ export class Gorilla {
     return this.dashTimer > 0;
   }
 
+  get dashDirection(): { x: number; z: number } {
+    return this.dashDir;
+  }
+
   get landingSlowed(): boolean {
     return this.landingSlow > 0;
   }
@@ -349,7 +353,7 @@ export class Gorilla {
     this.swingTime = 0;
     const c = this.center;
     const dist = Math.hypot(c.x - vine.x, c.y - vine.top, c.z - vine.z);
-    const clearance = ctx.world.groundHeight(vine.x, vine.z) + this.body.height / 2 + 0.8;
+    const clearance = ctx.world.groundHeight(vine.x, vine.z) + this.body.height / 2 + 1.6; // feet skim clear of bumps
     this.ropeTarget = Math.max(G.swingMinRopeLength, Math.min(dist, vine.top - clearance));
     this.ropeLength = Math.max(this.ropeTarget, dist);
     // Drop any velocity pulling away from the pivot; keep the rest.
@@ -371,8 +375,6 @@ export class Gorilla {
       return;
     }
     this.swingTime += dt;
-    // Reel in toward the target length (smoothly lifts a gorilla that grabbed low).
-    this.ropeLength = Math.max(this.ropeTarget, this.ropeLength - G.swingReelSpeed * dt);
 
     const f = forwardOf(input.yaw), r = rightOf(input.yaw);
     const wishX = f.x * input.moveY + r.x * input.moveX, wishZ = f.z * input.moveY + r.z * input.moveX;
@@ -383,6 +385,8 @@ export class Gorilla {
     // Pendulum in small sub-steps: gravity + pumping, then the rope constraint (it can go slack).
     const steps = 4, h = dt / steps;
     for (let i = 0; i < steps; i++) {
+      // Reel in toward the target length (smoothly lifts a gorilla that grabbed low).
+      this.ropeLength = Math.max(this.ropeTarget, this.ropeLength - G.swingReelSpeed * h);
       const dx = x - p.x, dy = y - p.y, dz = z - p.z;
       const len = Math.hypot(dx, dy, dz) || 1;
       const rx = dx / len, ry = dy / len, rz = dz / len;
@@ -401,12 +405,18 @@ export class Gorilla {
       const ox = nx - p.x, oy = ny - p.y, oz = nz - p.z;
       const olen = Math.hypot(ox, oy, oz);
       if (olen > this.ropeLength) {
-        nx = p.x + (ox / olen) * this.ropeLength;
-        ny = p.y + (oy / olen) * this.ropeLength;
-        nz = p.z + (oz / olen) * this.ropeLength;
-        vx = (nx - x) / h;
-        vy = (ny - y) / h;
-        vz = (nz - z) / h;
+        // Taut: put the body back on the rope and drop only the speed pulling outward, so
+        // reeling in lifts it without a jolt.
+        const ux = ox / olen, uy = oy / olen, uz = oz / olen;
+        nx = p.x + ux * this.ropeLength;
+        ny = p.y + uy * this.ropeLength;
+        nz = p.z + uz * this.ropeLength;
+        const outward = vx * ux + vy * uy + vz * uz;
+        if (outward > 0) {
+          vx -= ux * outward;
+          vy -= uy * outward;
+          vz -= uz * outward;
+        }
       }
       x = nx;
       y = ny;
@@ -423,7 +433,7 @@ export class Gorilla {
     this.vel = { x: vx, y: vy, z: vz };
     if (Math.hypot(vx, vz) > 1) this.yaw = turnToward(this.yaw, Math.atan2(vx, vz), 8 * dt);
 
-    const hit = moveBody(ctx.world, this.body, x - start.x, y - start.y, z - start.z);
+    const hit = moveBody(ctx.world, this.body, x - start.x, y - start.y, z - start.z, 0.6, true); // skim over small bumps
     if (hit.hitX) this.vel.x *= -0.2;
     if (hit.hitZ) this.vel.z *= -0.2;
     if (hit.hitY) this.vel.y = 0;

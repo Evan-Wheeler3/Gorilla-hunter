@@ -30,7 +30,7 @@ export class Controls {
   yaw = 0;
   pitch = -0.15;
   readonly isTouch: boolean;
-  /** Set by the game each frame: hunters on touch sprint when the stick is pushed fully. */
+  /** Set by the game each frame: on touch, pushing the stick past half-way runs. */
   team: Team = 'hunter';
 
   private keys = new Set<string>();
@@ -249,9 +249,13 @@ export class Controls {
     }
     let sprint = k('ShiftLeft') || k('ShiftRight');
     if (this.stick.id >= 0) {
-      moveX = this.stick.x;
-      moveY = this.stick.y;
-      sprint = Math.hypot(moveX, moveY) > 0.92; // push the stick all the way to run
+      // A small dead zone, full speed from just past half-way out, and run whenever the stick
+      // is past half-way: thumbs rarely hold the stick right at the edge.
+      const mag = Math.hypot(this.stick.x, this.stick.y);
+      const scale = mag < 0.12 ? 0 : Math.min(1, (mag - 0.12) / 0.4) / mag;
+      moveX = this.stick.x * scale;
+      moveY = this.stick.y * scale;
+      sprint = mag > 0.5;
     }
 
     const state: ControlState = {

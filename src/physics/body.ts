@@ -31,9 +31,9 @@ export function overlaps(world: VoxelWorld, x: number, y: number, z: number, hw:
 
 /**
  * Moves a body by (dx, dy, dz) against the voxel world, axis by axis in small sub-steps.
- * Horizontal moves on the ground climb ledges up to stepHeight automatically.
+ * Horizontal moves on the ground (or anywhere, with stepInAir) climb ledges up to stepHeight automatically.
  */
-export function moveBody(world: VoxelWorld, body: Body, dx: number, dy: number, dz: number, stepHeight = 0): MoveResult {
+export function moveBody(world: VoxelWorld, body: Body, dx: number, dy: number, dz: number, stepHeight = 0, stepInAir = false): MoveResult {
   const result: MoveResult = { hitX: false, hitY: false, hitZ: false };
   const steps = Math.max(1, Math.ceil(Math.max(Math.abs(dx), Math.abs(dy), Math.abs(dz)) / MAX_STEP));
   const sx = dx / steps, sy = dy / steps, sz = dz / steps;
@@ -48,7 +48,7 @@ export function moveBody(world: VoxelWorld, body: Body, dx: number, dy: number, 
         if (sy < 0) body.onGround = true;
       }
     }
-    const canStep = stepHeight > 0 && (wasGrounded || body.onGround);
+    const canStep = stepHeight > 0 && (stepInAir || wasGrounded || body.onGround);
     if (sx !== 0 && moveAxisWithStep(world, body, 0, sx, canStep ? stepHeight : 0) !== sx) result.hitX = true;
     if (sz !== 0 && moveAxisWithStep(world, body, 2, sz, canStep ? stepHeight : 0) !== sz) result.hitZ = true;
   }

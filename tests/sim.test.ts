@@ -86,6 +86,22 @@ describe('practice match', () => {
     expect(h.dead).toBe(false);
   });
 
+  it('a dashing gorilla ploughs through a hunter and keeps going', () => {
+    const m = practice();
+    run(m, 0.5);
+    const h = m.hunters.get(1)!, g = m.gorillas.get(2)!;
+    g.setPosition({ x: h.body.x, y: h.body.y + 0.1, z: h.body.z - 4 });
+    run(m, 0.3);
+    const startZ = g.body.z;
+    run(m, 0.4, (t) => new Map([[2, { ...emptyInput(0), moveY: 1, dash: t === 0 }]]));
+    expect(h.dead).toBe(true);
+    const kill = m.effects.find((e) => e.type === 'kill');
+    expect(kill && kill.type === 'kill' && kill.dash !== undefined && !kill.finisher).toBe(true);
+    expect(g.inFinisher).toBe(false); // no lock: the gorilla carries straight on
+    expect(g.body.z).toBeGreaterThan(h.body.z + 0.5);
+    expect(g.body.z - startZ).toBeGreaterThan(4);
+  });
+
   it('slapping a downed teammate knocks time off and can wake him', () => {
     const m = practice();
     run(m, 0.5);

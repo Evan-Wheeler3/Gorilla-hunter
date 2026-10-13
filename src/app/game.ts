@@ -43,6 +43,9 @@ export class Game {
   private readonly ropeMat = new THREE.MeshLambertMaterial({ color: 0x4d8a2e });
   private readonly clock = new THREE.Clock();
   private accumulator = 0;
+  /** Each character's position before the latest sim step, for smooth in-between rendering. */
+  private readonly prevPos = new Map<number, { x: number; y: number; z: number }>();
+  private alpha = 1;
   private running = false;
   private slowMo = 0; // real seconds of slow motion left
   private sleepPuffTimer = 0;
@@ -171,6 +174,7 @@ export class Game {
         interactHeld: control.interactHeld,
         aimPoint: first && control.primary ? this.aimPoint() : null,
       };
+      for (const c of [...this.match.gorillas.values(), ...this.match.hunters.values()]) this.prevPos.set(c.id, { x: c.body.x, y: c.body.y, z: c.body.z });
       this.match.step(SIM_DT, new Map([[this.options.localId, input]]));
       this.accumulator -= SIM_DT;
       first = false;
@@ -180,6 +184,7 @@ export class Game {
       this.controls.requeue(control);
     }
 
+    this.alpha = Math.min(1, this.accumulator / SIM_DT);
     this.consumeEffects();
     this.syncRigs(dt);
     this.finishers.update(dt, this.time);
@@ -205,7 +210,8 @@ export class Game {
       switch (e.type) {
         case 'kill': {
           const rig = this.rigs.get(e.killer)?.rig;
-          if (e.finisher && rig instanceof GorillaRig) this.finishers.start(e, rig, id);
+          if (e.dash) this.finishers.dashKill({ ...e, dash: e.dash }, id);
+          else if (e.finisher && rig instanceof GorillaRig) this.finishers.start(e, rig, id);
           else this.effects.hunterKilled(e.at, e.yaw, e.pick); // a second hunter caught in the same swipe
           break;
         }
@@ -253,11 +259,13 @@ export class Game {
       }
       if (c.team === 'gorilla') {
         (entry.rig as GorillaRig).update(c, dt, this.time, this.finishers.poseFor(c.id));
-        this.updateRope(c);
+        entry.rig.root.position.copy(this.renderPos(c));
+        this.updateRope(c, entry.rig as GorillaRig);
         if (c.sedation.isDown && this.sleepPuffTimer <= 0) this.effects.sleepPuff(c.body);
         if (c.body.onGround && Math.hypot(c.vel.x, c.vel.z) > 6 && this.dustTimer <= 0) this.effects.dust(c.body, 2);
       } else {
         (entry.rig as HunterRig).update(c, dt, this.time);
+        entry.rig.root.position.copy(this.renderPos(c));
       }
     }
     if (this.sleepPuffTimer <= 0) this.sleepPuffTimer = 0.5;
@@ -270,8 +278,16 @@ export class Game {
       }
   }
 
+  /** Where to draw a character: between its last two sim positions, so motion is smooth at any frame rate. */
+  private renderPos(c: Gorilla | Hunter): THREE.Vector3 {
+    const cur = c.body, prev = this.prevPos.get(c.id);
+    if (!prev || Math.abs(cur.x - prev.x) + Math.abs(cur.y - prev.y) + Math.abs(cur.z - prev.z) > 3) return new THREE.Vector3(cur.x, cur.y, cur.z); // teleported
+    const a = this.alpha;
+    return new THREE.Vector3(prev.x + (cur.x - prev.x) * a, prev.y + (cur.y - prev.y) * a, prev.z + (cur.z - prev.z) * a);
+  }
+
   /** The vine a gorilla is swinging on, drawn from its raised hand to the anchor. */
-  private updateRope(g: Gorilla): void {
+  private updateRope(g: Gorilla, rig: GorillaRig): void {
     let rope = this.ropes.get(g.id);
     if (!g.swingPivot || g.state !== 'swing') {
       if (rope) rope.visible = false;
@@ -283,7 +299,7 @@ export class Game {
       this.scene.add(rope);
       this.ropes.set(g.id, rope);
     }
-    const hand = new THREE.Vector3(g.body.x, g.body.y + 2.9, g.body.z);
+    const hand = rig.hand(1);
     const a = new THREE.Vector3(g.swingPivot.x, g.swingPivot.y, g.swingPivot.z);
     rope.visible = true;
     rope.position.copy(hand).add(a).multiplyScalar(0.5);
@@ -298,12 +314,13 @@ export class Game {
     const yaw = this.controls.yaw;
     const baseFov = this.camera.aspect < 1 ? 82 : 70;
     if (!me) return { pivot: new THREE.Vector3(0, 10, 0), distance: 10, fov: baseFov };
+    const at = this.renderPos(me);
     if (me.team === 'gorilla') {
       const down = me.sedation.isDown;
       // Swinging happens right under the canopy: keep the camera at body height so it stays below the leaves.
       const height = down ? 1.6 : me.state === 'swing' ? 1.5 : C.cameraHeightGorilla;
       return {
-        pivot: new THREE.Vector3(me.body.x, me.body.y + height, me.body.z),
+        pivot: new THREE.Vector3(at.x, at.y + height, at.z),
         distance: down ? 8 : me.state === 'swing' ? 7.5 : me.inFinisher ? C.cameraDistanceGorilla + 2.5 : C.cameraDistanceGorilla,
         fov: baseFov + (me.dashing ? 10 : 0) + Math.min(8, Math.hypot(me.vel.x, me.vel.z) * 0.4),
       };
@@ -313,7 +330,7 @@ export class Game {
     const dragging = me.dragging !== null;
     const shoulder = aiming ? 0.95 : C.cameraShoulderHunter;
     return {
-      pivot: new THREE.Vector3(me.body.x + r.x * shoulder, me.body.y + C.cameraHeightHunter + (dragging ? 1.2 : aiming ? 0.1 : 0), me.body.z + r.z * shoulder),
+      pivot: new THREE.Vector3(at.x + r.x * shoulder, at.y + C.cameraHeightHunter + (dragging ? 1.2 : aiming ? 0.1 : 0), at.z + r.z * shoulder),
       distance: me.dead ? 7 : aiming ? 2.3 : dragging ? 5.5 : C.cameraDistanceHunter,
       fov: aiming ? baseFov * 0.65 : baseFov + (me.sprinting ? 6 : 0),
     };
