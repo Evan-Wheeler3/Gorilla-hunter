@@ -7,6 +7,8 @@ export interface FinisherDefinition {
   id: string;
   name: string;
   rarity: FinisherRarity;
+  /** Seconds the gorilla is locked into the animation. */
+  duration: number;
 }
 
 /** A finisher picked for one kill. Every client replays the same animation and debris from the seed. */
@@ -17,14 +19,14 @@ export interface FinisherPick {
 
 /** The 8 launch finishers from design doc section 6. */
 export const LAUNCH_FINISHERS: FinisherDefinition[] = [
-  { id: 'rip_in_half', name: 'Rip in Half', rarity: 'common' },
-  { id: 'head_pop', name: 'Head Pop', rarity: 'common' },
-  { id: 'arm_rip', name: 'Arm Rip', rarity: 'common' },
-  { id: 'twirl_and_throw', name: 'Twirl and Throw', rarity: 'common' },
-  { id: 'crumple_ball', name: 'Crumple Ball', rarity: 'uncommon' },
-  { id: 'head_clap', name: 'Head Clap', rarity: 'uncommon' },
-  { id: 'ragdoll_slam', name: 'Ragdoll Slam', rarity: 'uncommon' },
-  { id: 'drum_solo', name: 'Drum Solo', rarity: 'legendary' },
+  { id: 'rip_in_half', name: 'Rip in Half', rarity: 'common', duration: 2.0 },
+  { id: 'head_pop', name: 'Head Pop', rarity: 'common', duration: 1.9 },
+  { id: 'arm_rip', name: 'Arm Rip', rarity: 'common', duration: 2.4 },
+  { id: 'twirl_and_throw', name: 'Twirl and Throw', rarity: 'common', duration: 2.4 },
+  { id: 'crumple_ball', name: 'Crumple Ball', rarity: 'uncommon', duration: 2.2 },
+  { id: 'head_clap', name: 'Head Clap', rarity: 'uncommon', duration: 1.8 },
+  { id: 'ragdoll_slam', name: 'Ragdoll Slam', rarity: 'uncommon', duration: 2.6 },
+  { id: 'drum_solo', name: 'Drum Solo', rarity: 'legendary', duration: 3.0 },
 ];
 
 const TIERS: FinisherRarity[] = ['common', 'uncommon', 'rare', 'legendary'];

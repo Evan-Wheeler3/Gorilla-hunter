@@ -9,13 +9,18 @@ describe('island', () => {
   const island = generateIsland(1234);
   const { world } = island;
 
-  it('has land, trees, vine anchors and four docks', () => {
+  it('has land, tall trees, long vines and four docks', () => {
     expect(world.surfaceHeight(0, 0)).toBeGreaterThan(config.world.waterLevel);
     expect(world.surfaceHeight(63, 63)).toBeLessThan(config.world.waterLevel);
     let wood = 0;
     for (let i = 0; i < world.data.length; i++) if (world.data[i] === Block.Wood) wood++;
     expect(wood).toBeGreaterThan(1000);
-    expect(island.anchors.length).toBeGreaterThan(60);
+    expect(island.vines.length).toBeGreaterThan(100);
+    // Trees tower over the players: most vines start 10 m or more above the ground.
+    const tall = island.vines.filter((v) => v.top - world.groundHeight(v.x, v.z) > 10).length;
+    expect(tall / island.vines.length).toBeGreaterThan(0.7);
+    // Vines reach down within a gorilla's jump.
+    for (const v of island.vines) expect(v.bottom - world.groundHeight(v.x, v.z)).toBeLessThan(6);
     expect(island.docks.length).toBe(4);
   });
 

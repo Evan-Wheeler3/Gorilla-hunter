@@ -22,9 +22,8 @@ live in `GameConfig` and are starting points for playtests.
 | Boats | 1, east shore | 4, one per shore (tested: every point on the island is within the dragging window) |
 | Round length | 12:00, fire at 6:00 | 10:00, fire at 5:00 |
 
-Status: the rules are unit tested (`Core/Match/InfectionRound.cs`, `TeamAssignment.cs`) and
-playable offline in the greybox scene through `Match/MatchManager.cs`. Not yet: bots,
-networking, the wildfire itself, finisher animations.
+Status: rules unit tested (`src/core/round.ts`, `teams.ts`) and playable offline in the browser
+(`src/game/match.ts`). Not yet: bots, multiplayer, the wildfire itself.
 
 ## Combat and movement
 
@@ -39,7 +38,8 @@ networking, the wildfire itself, finisher animations.
 | Gorilla slaps a downed teammate | only cut a binding (3 s) | every swipe on a downed gorilla knocks 2 s off its timer (8 slaps wake it from 15 s) | built |
 | Hunter sprint | 3 s | unlimited (can be switched back to a 10 s bar) | built |
 | Gorilla swipe | 50 dmg, two hits kill | 100 dmg, one hit kills | built |
-| Finishers | play on a successful grab | play on every kill (any swipe kill); grab may be cut | picker built and tested; animations later |
+| Finishers | play on a successful grab, with a "Finisher of the Round" replay | every kill plays one of 8 hand-choreographed finishers; no text names the kill, you just see it | built |
+| Trees and vines | swing anchors between trees | 13 to 22 m trees; long vines hang from the canopy to about 3 m off the ground; grab anywhere, swing from the top | built and tested |
 | Dragging | 40% speed alone, no sprint | full speed, sprint allowed; tap E to grab or drop, hold E 3 s to tie up | built |
 | Gorilla wakes while dragged | throws off nearby hunters (1.5 s stun) | same, for the dragger | built |
 

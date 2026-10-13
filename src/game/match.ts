@@ -20,7 +20,7 @@ export interface MatchOptions {
 
 /** Things that happened this step, for effects, sounds and the HUD. */
 export type MatchEffect =
-  | { type: 'kill'; victim: number; killer: number; at: Vec3; yaw: number; pick: FinisherPick }
+  | { type: 'kill'; victim: number; killer: number; at: Vec3; killerAt: Vec3; yaw: number; pick: FinisherPick; finisher: boolean }
   | { type: 'dartHit'; target: number | null; at: Vec3 }
   | { type: 'knockout'; gorilla: number }
   | { type: 'slap'; gorilla: number; at: Vec3 }
@@ -58,6 +58,8 @@ export class Match {
   readonly effects: MatchEffect[] = [];
   readonly round: InfectionRound;
   announcement = '';
+  /** Test hook: the next kill plays this finisher id. */
+  forceFinisher: string | null = null;
   announcementUntil = 0;
 
   private readonly finishers: FinisherSelector;
@@ -66,7 +68,7 @@ export class Match {
     readonly island: Island,
     readonly options: MatchOptions,
   ) {
-    this.ctx = { world: island.world, anchors: island.anchors, time: 0 };
+    this.ctx = { world: island.world, vines: island.vines, time: 0 };
     this.finishers = new FinisherSelector(LAUNCH_FINISHERS, config.finishers, (Math.random() * 1e9) | 0);
 
     let gi = 0, hi = 0;
@@ -129,6 +131,7 @@ export class Match {
 
     for (const g of this.gorillas.values()) {
       g.held = held;
+      g.inFinisher = this.ctx.time < g.finisherUntil;
       g.update(inputs.get(g.id) ?? emptyInput(g.yaw), dt, this.ctx);
       const wasDown = g.sedation.isDown;
       const ev = g.sedation.tick(dt, g.draggedBy !== null ? S.draggedDowntimeRate : 1);
@@ -210,14 +213,32 @@ export class Match {
     const cy = g.body.y + 1.2;
     const radius = reach * 0.6;
 
+    let finisherStarted = false;
     for (const h of this.hunters.values()) {
       if (h.dead) continue;
       const d = Math.hypot(h.body.x - cx, h.body.y + 0.9 - cy, h.body.z - cz);
       if (d > radius + h.body.halfWidth) continue;
       h.kill(this.ctx.time);
-      const pick = this.finishers.pick(g.id, g.rage);
-      this.effects.push({ type: 'kill', victim: h.id, killer: g.id, at: { x: h.body.x, y: h.body.y, z: h.body.z }, yaw: g.yaw, pick });
-      this.announce(`${g.name}: ${pick.finisher.name}!`);
+      let pick = this.finishers.pick(g.id, g.rage);
+      const forced = LAUNCH_FINISHERS.find((f) => f.id === this.forceFinisher);
+      if (forced) pick = { ...pick, finisher: forced };
+      // The first victim gets the full finisher: the gorilla turns to face him and is locked in.
+      const finisher = !finisherStarted;
+      if (finisher) {
+        finisherStarted = true;
+        g.yaw = Math.atan2(h.body.x - g.body.x, h.body.z - g.body.z);
+        g.finisherUntil = this.ctx.time + pick.finisher.duration;
+      }
+      this.effects.push({
+        type: 'kill',
+        victim: h.id,
+        killer: g.id,
+        at: { x: h.body.x, y: h.body.y, z: h.body.z },
+        killerAt: { x: g.body.x, y: g.body.y, z: g.body.z },
+        yaw: g.yaw,
+        pick,
+        finisher,
+      });
       this.round.reportHunterKilled(h.id);
     }
     for (const other of this.gorillas.values()) {

@@ -319,43 +319,11 @@ body,
   color: #ff5a4a;
 }
 
-.finisher {
-  position: absolute;
-  top: 20%;
-  left: 0;
-  right: 0;
-  text-align: center;
-}
 
-.finisher .name {
-  font-family: 'Lilita One', sans-serif;
-  font-size: clamp(36px, 8vw, 72px);
-  color: #fff;
-  text-shadow: 0 5px 0 #8a1f2a, 0 10px 30px rgba(0, 0, 0, 0.5);
-}
 
-.finisher .rarity {
-  font-weight: 800;
-  letter-spacing: 3px;
-  font-size: 15px;
-}
 
-.rarity.common { color: #e6e6e6; }
-.rarity.uncommon { color: #6fe36f; }
-.rarity.rare { color: #6fb7ff; }
-.rarity.legendary { color: #ffb52e; }
 
-.finisher.pop {
-  animation: pop 2.2s ease-out forwards;
-}
 
-@keyframes pop {
-  0% { transform: scale(2.2) rotate(-6deg); opacity: 0; }
-  12% { transform: scale(0.95) rotate(-3deg); opacity: 1; }
-  20% { transform: scale(1.05) rotate(-3deg); }
-  80% { opacity: 1; }
-  100% { transform: scale(1) rotate(-3deg); opacity: 0; }
-}
 
 .results {
   position: absolute;

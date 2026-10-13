@@ -25,6 +25,19 @@ interface Particle {
 
 const MAX_PARTICLES = 1500;
 
+/** A detached body part (or a whole body) flying as a rigid piece. */
+interface Chunk {
+  obj: THREE.Object3D;
+  vel: THREE.Vector3;
+  spin: THREE.Vector3;
+  life: number;
+  maxLife: number;
+  /** Burst into cubes of these colours on the first hard impact (or when the fuse runs out). */
+  burstColors: number[] | null;
+  fuse: number;
+  radius: number;
+}
+
 /**
  * Pooled voxel particles (kill debris, dust, dart puffs, slap stars, conversion confetti) plus
  * dart meshes. Everything is one instanced draw call, so it stays cheap on phones.
@@ -40,6 +53,8 @@ export class Effects {
   private readonly e = new THREE.Euler();
   private readonly v = new THREE.Vector3();
   private readonly sv = new THREE.Vector3();
+  private readonly chunks: Chunk[] = [];
+  private readonly tmpQ = new THREE.Quaternion();
   /** Camera shake strength, decays over time. */
   shake = 0;
 
@@ -139,6 +154,34 @@ export class Effects {
     this.shake = Math.max(this.shake, 0.6);
   }
 
+  /**
+   * Detaches a body part into the world (keeping where it is) and lets it fly. With burstColors
+   * it explodes into cubes when it slams into the ground, or when `fuse` seconds run out.
+   */
+  addChunk(obj: THREE.Object3D, vel: THREE.Vector3, spin: THREE.Vector3, opts: { life?: number; burstColors?: number[]; fuse?: number; radius?: number } = {}): void {
+    this.scene.attach(obj);
+    const life = opts.life ?? 5;
+    this.chunks.push({ obj, vel: vel.clone(), spin: spin.clone(), life, maxLife: life, burstColors: opts.burstColors ?? null, fuse: opts.fuse ?? Infinity, radius: opts.radius ?? 0.15 });
+  }
+
+  /** A spray of voxel cubes from a point; `dir` biases the spray. */
+  burst(at: { x: number; y: number; z: number }, colors: number[], count: number, speed: number, dir?: { x: number; y: number; z: number }, size = 0.16): void {
+    for (let i = 0; i < count; i++) {
+      const color = colors[(Math.random() * colors.length) | 0];
+      this.spawn({
+        x: at.x + (Math.random() - 0.5) * 0.3,
+        y: at.y + (Math.random() - 0.5) * 0.3,
+        z: at.z + (Math.random() - 0.5) * 0.3,
+        vx: (Math.random() - 0.5) * speed + (dir?.x ?? 0),
+        vy: Math.random() * speed * 0.8 + (dir?.y ?? 2),
+        vz: (Math.random() - 0.5) * speed + (dir?.z ?? 0),
+        size: size * (0.6 + Math.random() * 0.8),
+        color,
+        life: 4 + Math.random() * 3,
+      });
+    }
+  }
+
   dartHit(at: { x: number; y: number; z: number }, onGorilla: boolean): void {
     for (let i = 0; i < (onGorilla ? 18 : 6); i++)
       this.spawn({
@@ -217,8 +260,51 @@ export class Effects {
       });
   }
 
+  private updateChunks(dt: number): void {
+    const p = new THREE.Vector3();
+    for (let i = this.chunks.length - 1; i >= 0; i--) {
+      const c = this.chunks[i];
+      c.life -= dt;
+      c.fuse -= dt;
+      c.obj.getWorldPosition(p);
+      const explode = (c.burstColors && c.fuse <= 0) || c.life <= 0;
+      if (explode) {
+        if (c.burstColors) this.burst(p, c.burstColors, 50, 6, { x: c.vel.x * 0.3, y: 3, z: c.vel.z * 0.3 }, 0.2);
+        c.obj.removeFromParent();
+        this.chunks.splice(i, 1);
+        continue;
+      }
+      c.vel.y -= 20 * dt;
+      const next = p.clone().addScaledVector(c.vel, dt);
+      if (this.world.solidAt(next.x, next.y - c.radius, next.z)) {
+        const hard = Math.abs(c.vel.y) > 7;
+        if (c.burstColors && hard) {
+          this.burst(p, c.burstColors, 60, 7, { x: c.vel.x * 0.2, y: 4, z: c.vel.z * 0.2 }, 0.22);
+          this.shake = Math.max(this.shake, 0.35);
+          c.obj.removeFromParent();
+          this.chunks.splice(i, 1);
+          continue;
+        }
+        if (Math.abs(c.vel.y) > 3) this.dust({ x: p.x, y: p.y - c.radius, z: p.z }, 4);
+        if (!this.world.solidAt(next.x, p.y - c.radius, next.z)) c.vel.y = -c.vel.y * 0.3;
+        else c.vel.set(-c.vel.x * 0.3, c.vel.y, -c.vel.z * 0.3);
+        c.vel.x *= 0.6;
+        c.vel.z *= 0.6;
+        c.spin.multiplyScalar(0.5);
+      } else {
+        c.obj.position.add(next.sub(p));
+      }
+      this.tmpQ.setFromEuler(this.e.set(c.spin.x * dt, c.spin.y * dt, c.spin.z * dt));
+      c.obj.quaternion.premultiply(this.tmpQ);
+      // Shrink away at the end of its life.
+      const fade = Math.min(1, c.life / 0.6);
+      if (fade < 1) c.obj.scale.setScalar(Math.max(0.01, fade));
+    }
+  }
+
   update(dt: number, darts: Dart[]): void {
     this.shake = Math.max(0, this.shake - dt * 1.8);
+    this.updateChunks(dt);
     let n = 0;
     for (let i = this.particles.length - 1; i >= 0; i--) {
       const p = this.particles[i];

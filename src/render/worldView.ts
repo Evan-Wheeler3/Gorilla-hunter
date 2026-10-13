@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { config } from '../core/config';
-import type { Island } from '../world/island';
+import type { Island, Vine } from '../world/island';
 import { CHUNK, meshChunk } from '../world/mesher';
 
 /**
@@ -14,6 +14,10 @@ export class WorldView {
   private readonly waterMaterial: THREE.ShaderMaterial;
   private readonly beacons: THREE.Mesh[] = [];
   readonly anchorMarker: THREE.Mesh;
+  private readonly vineMesh: THREE.InstancedMesh;
+  private readonly vineIndex = new Map<Vine, number>();
+  private readonly vineMatrices: THREE.Matrix4[] = [];
+  private hiddenVine: Vine | null = null;
   private readonly sky: THREE.Mesh;
 
   constructor(scene: THREE.Scene, island: Island, quality: 'high' | 'low') {
@@ -101,25 +105,28 @@ export class WorldView {
     this.water.position.y = config.world.waterLevel - 0.15;
     this.group.add(this.water);
 
-    // Vines: hang from each anchor up into the crown, with a leafy knot at the bottom.
+    // Vines: long ropes from the canopy almost to the ground, with leaf tufts along them.
     const vineMat = new THREE.MeshLambertMaterial({ color: 0x3f7a2a });
-    const knotMat = new THREE.MeshLambertMaterial({ color: 0x5aa83a });
-    const vineGeo = new THREE.BoxGeometry(0.12, 1, 0.12);
-    const knotGeo = new THREE.BoxGeometry(0.4, 0.4, 0.4);
-    const vines = new THREE.InstancedMesh(vineGeo, vineMat, island.anchors.length);
-    const knots = new THREE.InstancedMesh(knotGeo, knotMat, island.anchors.length);
-    const m4 = new THREE.Matrix4();
-    island.anchors.forEach((a, i) => {
-      let top = a.y;
-      while (top < a.y + 4 && !world.solidAt(a.x, top + 0.25, a.z)) top += 0.25;
-      const len = Math.max(0.5, top - a.y + 0.25);
-      m4.compose(new THREE.Vector3(a.x, a.y + len / 2, a.z), new THREE.Quaternion(), new THREE.Vector3(1, len, 1));
-      vines.setMatrixAt(i, m4);
-      m4.compose(new THREE.Vector3(a.x, a.y, a.z), new THREE.Quaternion().setFromEuler(new THREE.Euler(0.3, i, 0.2)), new THREE.Vector3(1, 1, 1));
-      knots.setMatrixAt(i, m4);
+    const leafMat = new THREE.MeshLambertMaterial({ color: 0x5aa83a });
+    this.vineMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(0.14, 1, 0.14), vineMat, island.vines.length);
+    const tufts: THREE.Matrix4[] = [];
+    island.vines.forEach((v, i) => {
+      this.vineIndex.set(v, i);
+      const len = v.top - v.bottom;
+      const m = new THREE.Matrix4().compose(new THREE.Vector3(v.x, v.bottom + len / 2, v.z), new THREE.Quaternion(), new THREE.Vector3(1, len, 1));
+      this.vineMatrices.push(m);
+      this.vineMesh.setMatrixAt(i, m);
+      for (let y = v.bottom; y < v.top; y += 1.6 + (i % 3) * 0.3)
+        tufts.push(new THREE.Matrix4().compose(
+          new THREE.Vector3(v.x + Math.sin(y * 3 + i) * 0.12, y, v.z + Math.cos(y * 2 + i) * 0.12),
+          new THREE.Quaternion().setFromEuler(new THREE.Euler(0.4, y * 1.7 + i, 0.3)),
+          new THREE.Vector3(1, 1, 1),
+        ));
     });
-    vines.castShadow = knots.castShadow = true;
-    this.group.add(vines, knots);
+    const tuftMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(0.3, 0.12, 0.3), leafMat, tufts.length);
+    tufts.forEach((m, i) => tuftMesh.setMatrixAt(i, m));
+    this.vineMesh.castShadow = tuftMesh.castShadow = true;
+    this.group.add(this.vineMesh, tuftMesh);
 
     // Highlight ring for the vine the local gorilla can grab.
     this.anchorMarker = new THREE.Mesh(
@@ -147,6 +154,17 @@ export class WorldView {
     }
 
     scene.fog = new THREE.Fog(0xe9d8bf, 70, 230);
+  }
+
+  /** Hides the hanging vine the local gorilla is swinging on (the rope is drawn instead). */
+  hideVine(vine: Vine | null): void {
+    if (vine === this.hiddenVine) return;
+    const restore = this.hiddenVine !== null ? this.vineIndex.get(this.hiddenVine) : undefined;
+    if (restore !== undefined) this.vineMesh.setMatrixAt(restore, this.vineMatrices[restore]);
+    const hide = vine ? this.vineIndex.get(vine) : undefined;
+    if (hide !== undefined) this.vineMesh.setMatrixAt(hide, new THREE.Matrix4().makeScale(0, 0, 0));
+    this.hiddenVine = vine;
+    this.vineMesh.instanceMatrix.needsUpdate = true;
   }
 
   /** Per-frame: waves, beacon pulse, shadows that follow the player. */

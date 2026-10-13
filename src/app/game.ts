@@ -7,6 +7,7 @@ import { forwardOf, rightOf, type InputFrame } from '../game/types';
 import { Controls } from '../input/controls';
 import { GorillaRig, HunterRig } from '../render/characters';
 import { Effects } from '../render/effects';
+import { FinisherDirector } from '../render/finishers';
 import { WorldView } from '../render/worldView';
 import { Hud } from '../ui/hud';
 import type { Island } from '../world/island';
@@ -35,6 +36,7 @@ export class Game {
 
   private readonly world: WorldView;
   private readonly effects: Effects;
+  private readonly finishers: FinisherDirector;
   private readonly rigs = new Map<number, { team: string; rig: GorillaRig | HunterRig }>();
   private readonly ropes = new Map<number, THREE.Mesh>();
   private readonly ropeGeo = new THREE.CylinderGeometry(0.05, 0.05, 1, 6);
@@ -50,6 +52,8 @@ export class Game {
   private time = 0;
   private resizeHandler = () => this.resize();
   onExit: () => void = () => {};
+  /** Test hook: a fixed camera (used by automated screenshots). */
+  debugView: { from: { x: number; y: number; z: number }; to: { x: number; y: number; z: number } } | null = null;
 
   constructor(
     private readonly container: HTMLElement,
@@ -75,6 +79,10 @@ export class Game {
 
     this.world = new WorldView(this.scene, options.island, quality);
     this.effects = new Effects(this.scene, options.island.world);
+    this.finishers = new FinisherDirector(this.scene, this.effects);
+    this.finishers.onClimax = (involvesLocal) => {
+      if (involvesLocal) this.slowMo = 0.5;
+    };
     this.match = new Match(options.island, options.match);
     this.resetCameraToPlayer();
 
@@ -174,6 +182,7 @@ export class Game {
 
     this.consumeEffects();
     this.syncRigs(dt);
+    this.finishers.update(dt, this.time);
     this.updateCamera(realDt);
     this.effects.update(dt, this.match.darts);
     const focus = me ? new THREE.Vector3(me.body.x, 0, me.body.z) : this.camera.position;
@@ -194,11 +203,12 @@ export class Game {
     const id = this.options.localId;
     for (const e of this.match.effects.splice(0)) {
       switch (e.type) {
-        case 'kill':
-          this.effects.hunterKilled(e.at, e.yaw, e.pick);
-          this.hud.showFinisher(e.pick.finisher.name, e.pick.finisher.rarity, this.time);
-          if (e.killer === id || e.victim === id) this.slowMo = 0.45;
+        case 'kill': {
+          const rig = this.rigs.get(e.killer)?.rig;
+          if (e.finisher && rig instanceof GorillaRig) this.finishers.start(e, rig, id);
+          else this.effects.hunterKilled(e.at, e.yaw, e.pick); // a second hunter caught in the same swipe
           break;
+        }
         case 'dartHit':
           this.effects.dartHit(e.at, e.target !== null);
           break;
@@ -242,7 +252,7 @@ export class Game {
         this.rigs.set(c.id, entry);
       }
       if (c.team === 'gorilla') {
-        (entry.rig as GorillaRig).update(c, dt, this.time);
+        (entry.rig as GorillaRig).update(c, dt, this.time, this.finishers.poseFor(c.id));
         this.updateRope(c);
         if (c.sedation.isDown && this.sleepPuffTimer <= 0) this.effects.sleepPuff(c.body);
         if (c.body.onGround && Math.hypot(c.vel.x, c.vel.z) > 6 && this.dustTimer <= 0) this.effects.dust(c.body, 2);
@@ -263,7 +273,7 @@ export class Game {
   /** The vine a gorilla is swinging on, drawn from its raised hand to the anchor. */
   private updateRope(g: Gorilla): void {
     let rope = this.ropes.get(g.id);
-    if (!g.swingAnchor || g.state !== 'swing') {
+    if (!g.swingPivot || g.state !== 'swing') {
       if (rope) rope.visible = false;
       return;
     }
@@ -274,7 +284,7 @@ export class Game {
       this.ropes.set(g.id, rope);
     }
     const hand = new THREE.Vector3(g.body.x, g.body.y + 2.9, g.body.z);
-    const a = new THREE.Vector3(g.swingAnchor.x, g.swingAnchor.y, g.swingAnchor.z);
+    const a = new THREE.Vector3(g.swingPivot.x, g.swingPivot.y, g.swingPivot.z);
     rope.visible = true;
     rope.position.copy(hand).add(a).multiplyScalar(0.5);
     rope.scale.set(1, hand.distanceTo(a), 1);
@@ -294,7 +304,7 @@ export class Game {
       const height = down ? 1.6 : me.state === 'swing' ? 1.5 : C.cameraHeightGorilla;
       return {
         pivot: new THREE.Vector3(me.body.x, me.body.y + height, me.body.z),
-        distance: down ? 8 : me.state === 'swing' ? 7.5 : C.cameraDistanceGorilla,
+        distance: down ? 8 : me.state === 'swing' ? 7.5 : me.inFinisher ? C.cameraDistanceGorilla + 2.5 : C.cameraDistanceGorilla,
         fov: baseFov + (me.dashing ? 10 : 0) + Math.min(8, Math.hypot(me.vel.x, me.vel.z) * 0.4),
       };
     }
@@ -316,6 +326,12 @@ export class Game {
   }
 
   private updateCamera(dt: number): void {
+    if (this.debugView) {
+      const { from, to } = this.debugView;
+      this.camera.position.set(from.x, from.y, from.z);
+      this.camera.lookAt(to.x, to.y, to.z);
+      return;
+    }
     const { pivot, distance, fov } = this.cameraPivot();
     const dir = this.viewDir();
     // Pull in if the view behind the pivot is blocked by terrain or trees.
@@ -370,10 +386,12 @@ export class Game {
   private updateAnchorMarker(): void {
     const me = this.me;
     const marker = this.world.anchorMarker;
-    const anchor = me && me.team === 'gorilla' ? me.anchorInRange(this.match.ctx) : null;
-    marker.visible = !!anchor;
-    if (anchor) {
-      marker.position.set(anchor.x, anchor.y, anchor.z);
+    const vine = me && me.team === 'gorilla' ? me.vineInRange(this.match.ctx) : null;
+    this.world.hideVine(me && me.team === 'gorilla' ? me.swingVine : null);
+    marker.visible = !!vine;
+    if (vine && me) {
+      const y = Math.max(vine.bottom, Math.min(vine.top, me.body.y + 2.6));
+      marker.position.set(vine.x, y, vine.z);
       marker.lookAt(this.camera.position);
       const s = 1 + 0.15 * Math.sin(this.time * 8);
       marker.scale.set(s, s, s);

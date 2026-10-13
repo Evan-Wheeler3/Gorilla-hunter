@@ -2,14 +2,14 @@ import { config } from '../core/config';
 import { SedationMeter } from '../core/sedation';
 import { moveBody, overlaps, type Body } from '../physics/body';
 import { isClimbable } from '../world/blocks';
-import type { Vec3 } from '../world/island';
+import type { Vec3, Vine } from '../world/island';
 import { forwardOf, rightOf, type InputFrame, type SimContext } from './types';
 
 export type GorillaState = 'ground' | 'climb' | 'mantle' | 'swing' | 'down';
 
 const G = config.gorilla;
 const GRAVITY = config.world.gravity;
-const ANCHOR_REATTACH_DELAY = 0.4;
+const VINE_REGRAB_DELAY = 0.5;
 const RECLIMB_DELAY = 0.35;
 const STEP_HEIGHT = 1.0;
 
@@ -31,6 +31,10 @@ export class Gorilla {
   rage = false;
   held = false;
   readonly sedation = new SedationMeter(config.sedation);
+  /** Locked into a finisher animation until this match time. */
+  finisherUntil = -1;
+  /** True while the finisher plays (set by the match each step, for views). */
+  inFinisher = false;
   /** Id of the hunter dragging this gorilla's body, or null. */
   draggedBy: number | null = null;
 
@@ -39,7 +43,9 @@ export class Gorilla {
   lastSlappedTime = -10;
   stride = 0; // distance travelled on the ground, drives the run cycle
   climbFacing = { x: 0, z: 1 };
-  swingAnchor: Vec3 | null = null;
+  /** Vine being swung on and its pivot (top), or null. */
+  swingVine: Vine | null = null;
+  swingPivot: Vec3 | null = null;
 
   private dashTimer = 0;
   private dashCooldown = 0;
@@ -51,8 +57,11 @@ export class Gorilla {
   private mantleFrom = { x: 0, y: 0, z: 0 };
   private mantleTo = { x: 0, y: 0, z: 0 };
   private mantleT = 0;
+  private mantleDuration = G.mantleDuration;
   private ropeLength = 0;
-  private lastReleased: Vec3 | null = null;
+  private ropeTarget = 0;
+  private swingTime = 0;
+  private lastReleased: Vine | null = null;
   private lastReleaseTime = -10;
 
   constructor(
@@ -80,19 +89,19 @@ export class Gorilla {
     return this.landingSlow > 0;
   }
 
-  /** Nearest vine anchor in reach (for the HUD prompt and attaching). */
-  anchorInRange(ctx: SimContext): Vec3 | null {
-    if (this.state === 'down' || this.state === 'swing') return null;
+  /** Nearest vine within grabbing reach (for the HUD prompt and attaching), or null. */
+  vineInRange(ctx: SimContext): Vine | null {
+    if (this.state === 'down' || this.state === 'swing' || this.state === 'climb' || this.state === 'mantle') return null;
     const c = this.center;
-    const exclude = ctx.time - this.lastReleaseTime < ANCHOR_REATTACH_DELAY ? this.lastReleased : null;
-    let best: Vec3 | null = null;
-    let bestD = G.swingAttachRange * G.swingAttachRange;
-    for (const a of ctx.anchors) {
-      if (a === exclude || a.y < c.y + 0.3) continue;
-      const d = (a.x - c.x) ** 2 + (a.y - c.y) ** 2 + (a.z - c.z) ** 2;
+    const exclude = ctx.time - this.lastReleaseTime < VINE_REGRAB_DELAY ? this.lastReleased : null;
+    let best: Vine | null = null;
+    let bestD = G.swingGrabRange;
+    for (const v of ctx.vines) {
+      if (v === exclude) continue;
+      const d = Math.hypot(v.x - c.x, v.z - c.z, c.y - Math.max(v.bottom, Math.min(v.top, c.y)));
       if (d < bestD) {
         bestD = d;
-        best = a;
+        best = v;
       }
     }
     return best;
@@ -104,7 +113,8 @@ export class Gorilla {
     this.body.z = p.z;
     this.vel = { x: 0, y: 0, z: 0 };
     if (this.state !== 'down') this.state = 'ground';
-    this.swingAnchor = null;
+    this.swingVine = null;
+    this.swingPivot = null;
   }
 
   refillStamina(): void {
@@ -123,6 +133,13 @@ export class Gorilla {
     this.dashCooldown -= dt;
     this.landingSlow -= dt;
     this.swipeCooldown -= dt;
+
+    // Mid-finisher: the gorilla stays put until the animation ends (darts still land).
+    if (ctx.time < this.finisherUntil) {
+      this.vel = { x: 0, y: this.body.onGround ? -1 : this.vel.y - GRAVITY * dt, z: 0 };
+      moveBody(ctx.world, this.body, 0, this.vel.y * dt, 0);
+      return;
+    }
 
     if (this.sedation.isDown && this.state !== 'down') this.enterDown();
     if (!this.sedation.isDown && this.state === 'down') this.exitDown();
@@ -209,9 +226,9 @@ export class Gorilla {
       }
     }
 
-    const anchor = this.anchorInRange(ctx);
-    if (input.primaryHeld && anchor && this.stamina >= this.cost(G.swingAttachStaminaCost)) {
-      this.enterSwing(anchor);
+    const vine = this.vineInRange(ctx);
+    if (input.primaryHeld && vine && this.stamina >= this.cost(G.swingAttachStaminaCost)) {
+      this.enterSwing(vine, ctx);
       return;
     }
     if (input.primary) this.trySwipe(input.yaw, ctx);
@@ -290,13 +307,15 @@ export class Gorilla {
     ];
     const s = ctx.world.size;
     for (const c of columns) {
-      for (let ty = Math.ceil((b.y + 0.4) / s) * s; ty <= b.y + b.height + 2.5; ty += s) {
+      // Search well above the head: the canopy can be several metres thick.
+      for (let ty = Math.ceil((b.y + 0.4) / s) * s; ty <= b.y + b.height + 12; ty += s) {
         if (!ctx.world.solidAt(c.x, ty - s / 2, c.z)) continue;
         if (overlaps(ctx.world, c.x, ty, c.z, b.halfWidth * 0.9, b.height)) continue;
         this.state = 'mantle';
         this.mantleFrom = { x: b.x, y: b.y, z: b.z };
         this.mantleTo = { x: c.x, y: ty + 0.01, z: c.z };
         this.mantleT = 0;
+        this.mantleDuration = G.mantleDuration + Math.max(0, ty - b.y - 1) * 0.07;
         this.vel = { x: 0, y: 0, z: 0 };
         return true;
       }
@@ -305,7 +324,7 @@ export class Gorilla {
   }
 
   private updateMantle(dt: number): void {
-    this.mantleT = Math.min(1, this.mantleT + dt / G.mantleDuration);
+    this.mantleT = Math.min(1, this.mantleT + dt / this.mantleDuration);
     const t = this.mantleT;
     // Rise first, then move over the edge, so the body clears the lip.
     this.body.x = lerp(this.mantleFrom.x, this.mantleTo.x, t * t);
@@ -319,43 +338,81 @@ export class Gorilla {
 
   // ------------------------------------------------------------------ Swinging
 
-  private enterSwing(anchor: Vec3): void {
+  /**
+   * Grab a vine: swing from its top on a rope as long as the grab point, keeping the sideways
+   * momentum and reeling the body up so the lowest point of the arc clears the ground.
+   */
+  private enterSwing(vine: Vine, ctx: SimContext): void {
     this.state = 'swing';
-    this.swingAnchor = anchor;
+    this.swingVine = vine;
+    this.swingPivot = { x: vine.x, y: vine.top, z: vine.z };
+    this.swingTime = 0;
     const c = this.center;
-    this.ropeLength = Math.max(G.swingMinRopeLength, Math.hypot(anchor.x - c.x, anchor.y - c.y, anchor.z - c.z));
+    const dist = Math.hypot(c.x - vine.x, c.y - vine.top, c.z - vine.z);
+    const clearance = ctx.world.groundHeight(vine.x, vine.z) + this.body.height / 2 + 0.8;
+    this.ropeTarget = Math.max(G.swingMinRopeLength, Math.min(dist, vine.top - clearance));
+    this.ropeLength = Math.max(this.ropeTarget, dist);
+    // Drop any velocity pulling away from the pivot; keep the rest.
+    const rx = (c.x - vine.x) / dist, ry = (c.y - vine.top) / dist, rz = (c.z - vine.z) / dist;
+    const out = this.vel.x * rx + this.vel.y * ry + this.vel.z * rz;
+    if (out > 0) {
+      this.vel.x -= rx * out;
+      this.vel.y -= ry * out;
+      this.vel.z -= rz * out;
+    }
     this.stamina -= this.cost(G.swingAttachStaminaCost);
     this.dashTimer = 0;
   }
 
   private updateSwing(input: InputFrame, dt: number, ctx: SimContext): void {
-    const a = this.swingAnchor;
-    if (!a || !input.primaryHeld) {
-      this.releaseSwing(ctx);
+    const p = this.swingPivot;
+    if (!p || !this.swingVine || !input.primaryHeld) {
+      this.releaseSwing(ctx, true);
       return;
     }
-    const c = this.center;
-    const rope = normalize(c.x - a.x, c.y - a.y, c.z - a.z);
+    this.swingTime += dt;
+    // Reel in toward the target length (smoothly lifts a gorilla that grabbed low).
+    this.ropeLength = Math.max(this.ropeTarget, this.ropeLength - G.swingReelSpeed * dt);
+
     const f = forwardOf(input.yaw), r = rightOf(input.yaw);
-    const wish = { x: f.x * input.moveY + r.x * input.moveX, y: 0, z: f.z * input.moveY + r.z * input.moveX };
-    // Pump along the tangent plane of the rope.
-    const along = wish.x * rope.x + wish.z * rope.z;
-    const pump = { x: wish.x - rope.x * along, y: -rope.y * along, z: wish.z - rope.z * along };
+    const wishX = f.x * input.moveY + r.x * input.moveX, wishZ = f.z * input.moveY + r.z * input.moveX;
+    const start = this.center;
+    let x = start.x, y = start.y, z = start.z;
+    let { x: vx, y: vy, z: vz } = this.vel;
 
-    this.vel.y -= GRAVITY * dt;
-    this.vel.x += pump.x * G.swingPumpAcceleration * dt;
-    this.vel.y += pump.y * G.swingPumpAcceleration * dt;
-    this.vel.z += pump.z * G.swingPumpAcceleration * dt;
+    // Pendulum in small sub-steps: gravity + pumping, then the rope constraint (it can go slack).
+    const steps = 4, h = dt / steps;
+    for (let i = 0; i < steps; i++) {
+      const dx = x - p.x, dy = y - p.y, dz = z - p.z;
+      const len = Math.hypot(dx, dy, dz) || 1;
+      const rx = dx / len, ry = dy / len, rz = dz / len;
+      // Pump: the input direction projected onto the plane the rope can swing in.
+      const along = wishX * rx + wishZ * rz;
+      const px = wishX - rx * along, py = -ry * along, pz = wishZ - rz * along;
+      vx += px * G.swingPumpAcceleration * h;
+      vy += (py * G.swingPumpAcceleration - GRAVITY) * h;
+      vz += pz * G.swingPumpAcceleration * h;
+      const drag = 1 - G.swingDrag * h;
+      vx *= drag;
+      vy *= drag;
+      vz *= drag;
 
-    let nx = c.x + this.vel.x * dt, ny = c.y + this.vel.y * dt, nz = c.z + this.vel.z * dt;
-    const ox = nx - a.x, oy = ny - a.y, oz = nz - a.z;
-    const len = Math.hypot(ox, oy, oz);
-    if (len > this.ropeLength) {
-      nx = a.x + (ox / len) * this.ropeLength;
-      ny = a.y + (oy / len) * this.ropeLength;
-      nz = a.z + (oz / len) * this.ropeLength;
+      let nx = x + vx * h, ny = y + vy * h, nz = z + vz * h;
+      const ox = nx - p.x, oy = ny - p.y, oz = nz - p.z;
+      const olen = Math.hypot(ox, oy, oz);
+      if (olen > this.ropeLength) {
+        nx = p.x + (ox / olen) * this.ropeLength;
+        ny = p.y + (oy / olen) * this.ropeLength;
+        nz = p.z + (oz / olen) * this.ropeLength;
+        vx = (nx - x) / h;
+        vy = (ny - y) / h;
+        vz = (nz - z) / h;
+      }
+      x = nx;
+      y = ny;
+      z = nz;
     }
-    let vx = (nx - c.x) / dt, vy = (ny - c.y) / dt, vz = (nz - c.z) / dt;
+
     const speed = Math.hypot(vx, vy, vz);
     if (speed > G.swingMaxSpeed) {
       const k = G.swingMaxSpeed / speed;
@@ -364,23 +421,28 @@ export class Gorilla {
       vz *= k;
     }
     this.vel = { x: vx, y: vy, z: vz };
-    const hSpeed = Math.hypot(vx, vz);
-    if (hSpeed > 1) this.yaw = turnToward(this.yaw, Math.atan2(vx, vz), 8 * dt);
+    if (Math.hypot(vx, vz) > 1) this.yaw = turnToward(this.yaw, Math.atan2(vx, vz), 8 * dt);
 
-    const hit = moveBody(ctx.world, this.body, vx * dt, vy * dt, vz * dt);
-    if (hit.hitX) this.vel.x = 0;
-    if (hit.hitZ) this.vel.z = 0;
-    if (this.body.onGround) {
-      this.releaseSwing(ctx);
-      this.airFromSwing = false;
-    }
+    const hit = moveBody(ctx.world, this.body, x - start.x, y - start.y, z - start.z);
+    if (hit.hitX) this.vel.x *= -0.2;
+    if (hit.hitZ) this.vel.z *= -0.2;
+    if (hit.hitY) this.vel.y = 0;
+    // Dragging along the ground with no speed left: let go.
+    if (this.body.onGround && this.swingTime > 0.4 && Math.hypot(this.vel.x, this.vel.z) < 2) this.releaseSwing(ctx, false);
   }
 
-  private releaseSwing(ctx: SimContext): void {
-    this.lastReleased = this.swingAnchor;
+  /** Let go of the vine; a released swing launches the gorilla forward and up. */
+  private releaseSwing(ctx: SimContext, launch: boolean): void {
+    if (launch && this.swingVine) {
+      this.vel.x *= G.swingReleaseBoost;
+      this.vel.z *= G.swingReleaseBoost;
+      this.vel.y = Math.max(this.vel.y, 0) * G.swingReleaseBoost + G.swingReleaseLift;
+    }
+    this.lastReleased = this.swingVine;
     this.lastReleaseTime = ctx.time;
-    this.swingAnchor = null;
-    this.airFromSwing = true;
+    this.swingVine = null;
+    this.swingPivot = null;
+    this.airFromSwing = launch;
     this.state = 'ground';
   }
 
@@ -388,7 +450,8 @@ export class Gorilla {
 
   private enterDown(): void {
     this.state = 'down';
-    this.swingAnchor = null;
+    this.swingVine = null;
+    this.swingPivot = null;
     this.vel = { x: 0, y: Math.min(0, this.vel.y), z: 0 };
     this.body.height = 1.2; // lying down
   }
@@ -445,9 +508,4 @@ function airAccelerate(x: number, z: number, wx: number, wz: number, maxSpeed: n
   if (add <= 0) return [x, z];
   const a = Math.min(add, maxDelta);
   return [x + dx * a, z + dz * a];
-}
-
-function normalize(x: number, y: number, z: number): Vec3 {
-  const l = Math.hypot(x, y, z) || 1;
-  return { x: x / l, y: y / l, z: z / l };
 }

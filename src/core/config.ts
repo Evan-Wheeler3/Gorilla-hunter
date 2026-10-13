@@ -29,10 +29,14 @@ export const config = {
     climbSpeed: 4.5,
     climbJumpOffSpeed: 7,
     mantleDuration: 0.3,
-    swingAttachRange: 6,
-    swingMinRopeLength: 2.5,
-    swingMaxSpeed: 22,
-    swingPumpAcceleration: 9,
+    swingGrabRange: 2.6, // how close to a vine the gorilla's body must be to grab it
+    swingMinRopeLength: 3,
+    swingMaxSpeed: 26,
+    swingPumpAcceleration: 10,
+    swingDrag: 0.04,
+    swingReelSpeed: 6, // m/s the rope shortens to lift a low grab off the ground
+    swingReleaseBoost: 1.12,
+    swingReleaseLift: 3.5,
     swingLandingSlowDuration: 0.4,
     swingLandingSlowMultiplier: 0.5,
     swipeCooldown: 0.6,

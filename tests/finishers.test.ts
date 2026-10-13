@@ -35,7 +35,7 @@ describe('FinisherSelector', () => {
   it('is deterministic per seed and survives a one-item catalog', () => {
     const a = make(42), b = make(42);
     for (let i = 0; i < 100; i++) expect(a.pick(i % 3, i % 5 === 0)).toEqual(b.pick(i % 3, i % 5 === 0));
-    const one = new FinisherSelector([{ id: 'only', name: 'Only', rarity: 'common' }], config.finishers, 1);
+    const one = new FinisherSelector([{ id: 'only', name: 'Only', rarity: 'common', duration: 1 }], config.finishers, 1);
     expect(one.pick(1, false).finisher.id).toBe('only');
     expect(one.pick(1, false).finisher.id).toBe('only');
   });

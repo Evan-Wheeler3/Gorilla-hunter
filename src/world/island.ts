@@ -19,11 +19,21 @@ export interface Dock {
   name: string;
 }
 
+/** A vine hanging straight down: the gorilla grabs it anywhere and swings from the top. */
+export interface Vine {
+  x: number;
+  z: number;
+  /** Pivot height (just under the canopy), metres. */
+  top: number;
+  /** Lowest point of the vine, metres. */
+  bottom: number;
+}
+
 export interface Island {
   world: VoxelWorld;
   seed: number;
-  /** Vine attachment points under tree crowns. */
-  anchors: Vec3[];
+  /** Vines hanging from the canopy. */
+  vines: Vine[];
   docks: Dock[];
   hunterSpawns: Vec3[];
   gorillaSpawns: Vec3[];
@@ -105,7 +115,7 @@ export function generateIsland(seed = 1234): Island {
   buildCamp(world, rng);
 
   // ---- Trees, boulders ----------------------------------------------------------------
-  const anchors: Vec3[] = [];
+  const vines: Vine[] = [];
   const placed: { x: number; z: number }[] = [];
   const blocked = (x: number, z: number) =>
     Math.hypot(x, z) > ISLAND_RADIUS * 0.84 ||
@@ -121,10 +131,10 @@ export function generateIsland(seed = 1234): Island {
     // Denser canopy in the north for the gorilla nest.
     const nestBias = z > 15 ? 1 : 0.55;
     if (rng.next() > nestBias) continue;
-    const spacing = z > 15 ? 4.5 : 6;
+    const spacing = z > 15 ? 6 : 7.5;
     if (placed.some((p) => Math.hypot(p.x - x, p.z - z) < spacing)) continue;
     placed.push({ x, z });
-    buildTree(world, rng, x, z, z > 15 ? 2 : 0, anchors);
+    buildTree(world, rng, x, z, z > 15 ? 3 : 0, vines);
   }
 
   for (let i = 0; i < 16; i++) {
@@ -137,7 +147,7 @@ export function generateIsland(seed = 1234): Island {
   return {
     world,
     seed,
-    anchors,
+    vines,
     docks,
     hunterSpawns: [-3, -1, 1, 3].map((dx) => ground(CAMP.x + dx, CAMP.z + 4)),
     gorillaSpawns: [-6, -2, 2, 6].map((dx) => ground(NEST.x + dx, NEST.z)),
@@ -245,46 +255,56 @@ function buildCamp(world: VoxelWorld, rng: Rng): void {
   }
 }
 
-function buildTree(world: VoxelWorld, rng: Rng, x: number, z: number, extra: number, anchors: Vec3[]): void {
+function buildTree(world: VoxelWorld, rng: Rng, x: number, z: number, extra: number, vines: Vine[]): void {
   const s = world.size;
   const ground = world.surfaceHeight(x, z);
   if (ground < WATER + 0.6) return;
-  const height = rng.range(6, 9.5) + extra;
+  const height = rng.range(13, 19) + extra;
   const tx = Math.floor(x / s) * s, tz = Math.floor(z / s) * s;
-  world.fillBox(tx, ground, tz, tx + 1, ground + height, tz + 1, Block.Wood);
+  const cx = tx + 0.75, cz = tz + 0.75; // trunk centre (1.5 m wide trunk)
+  world.fillBox(tx, ground, tz, tx + 1.5, ground + height, tz + 1.5, Block.Wood);
+  // Root flare so the big trunks sit in the ground.
+  world.fillBox(tx - 0.5, ground, tz - 0.5, tx + 2, ground + 0.5, tz + 2, Block.Wood);
 
-  // Leafy crown: a squashed noisy ellipsoid around the trunk top.
-  const rx = rng.range(2.6, 3.6), ry = rng.range(1.5, 2.1);
+  // Leafy crown: a broad, squashed, noisy ellipsoid around the trunk top.
+  const rx = rng.range(3.8, 5.2), ry = rng.range(2, 2.8);
   const cy = ground + height;
   const leaf = rng.next() < 0.5 ? Block.Leaves : Block.LeavesDark;
+  const other = leaf === Block.Leaves ? Block.LeavesDark : Block.Leaves;
   for (let dy = -ry; dy <= ry; dy += s)
     for (let dz = -rx; dz <= rx; dz += s)
       for (let dx = -rx; dx <= rx; dx += s) {
         const e = (dx * dx + dz * dz) / (rx * rx) + (dy * dy) / (ry * ry);
-        if (e < 1 - rng.next() * 0.3) {
-          const b = rng.next() < 0.25 ? (leaf === Block.Leaves ? Block.LeavesDark : Block.Leaves) : leaf;
-          world.set(world.ix(tx + 0.5 + dx), world.iy(cy + dy), world.iz(tz + 0.5 + dz), b);
-        }
+        if (e < 1 - rng.next() * 0.3)
+          world.set(world.ix(cx + dx), world.iy(cy + dy), world.iz(cz + dz), rng.next() < 0.25 ? other : leaf);
       }
 
-  // Side branches with small leaf tufts.
-  const branches = 1 + rng.int(2);
+  // Side branches with leafy pads: perches halfway up.
+  const branches = 1 + rng.int(3);
   for (let i = 0; i < branches; i++) {
-    const y = ground + height * rng.range(0.45, 0.7);
+    const y = ground + height * rng.range(0.4, 0.75);
     const angle = rng.int(4) * (Math.PI / 2);
     const bx = Math.round(Math.cos(angle)), bz = Math.round(Math.sin(angle));
-    for (let t = 1; t <= 2.5; t += s) world.set(world.ix(tx + 0.5 + bx * t), world.iy(y), world.iz(tz + 0.5 + bz * t), Block.Wood);
-    const ex = tx + 0.5 + bx * 3, ez = tz + 0.5 + bz * 3;
-    world.fillBox(ex - 0.75, y, ez - 0.75, ex + 0.75, y + 1, ez + 0.75, leaf);
+    for (let t = 0.75; t <= 3.5; t += s) world.set(world.ix(cx + bx * t), world.iy(y), world.iz(cz + bz * t), Block.Wood);
+    const ex = cx + bx * 4, ez = cz + bz * 4;
+    world.fillBox(ex - 1.25, y, ez - 1.25, ex + 1.25, y + 1, ez + 1.25, rng.next() < 0.5 ? leaf : other);
   }
 
-  // Vine anchors hanging under the crown edge, on opposite sides.
+  // Long vines hanging from the underside of the crown almost to the ground.
   const a0 = rng.next() * Math.PI * 2;
-  for (const a of [a0, a0 + Math.PI]) {
-    const ax = tx + 0.5 + Math.cos(a) * (rx - 0.6), az = tz + 0.5 + Math.sin(a) * (rx - 0.6);
-    let ay = cy - ry - 0.3;
-    while (ay > ground + 3 && world.solidAt(ax, ay, az)) ay -= s;
-    if (ay > ground + 3) anchors.push({ x: ax, y: ay, z: az });
+  const count = 2 + rng.int(2);
+  for (let i = 0; i < count; i++) {
+    const a = a0 + (i / count) * Math.PI * 2;
+    const vx = cx + Math.cos(a) * rx * 0.65, vz = cz + Math.sin(a) * rx * 0.65;
+    let top = cy;
+    while (top > ground + 5 && world.solidAt(vx, top, vz)) top -= s;
+    if (top <= ground + 5) continue;
+    let bottom = top;
+    const lowest = world.groundHeight(vx, vz) + rng.range(2.4, 3.4);
+    while (bottom - s > lowest && !world.solidAt(vx, bottom - s, vz)) bottom -= s;
+    // Skip vines blocked by a branch partway down: they would end out of reach.
+    if (top - bottom < 4 || bottom > lowest + 1) continue;
+    vines.push({ x: vx, z: vz, top, bottom });
   }
 }
 

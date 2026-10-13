@@ -1,5 +1,5 @@
 import type { VoxelWorld } from '../world/voxelWorld';
-import type { Vec3 } from '../world/island';
+import type { Vec3, Vine } from '../world/island';
 
 /** One frame of player intent, from keyboard/mouse, touch, the network or a bot. */
 export interface InputFrame {
@@ -40,7 +40,7 @@ export type Team = 'gorilla' | 'hunter';
 /** What a character controller may ask of the match while it updates. */
 export interface SimContext {
   world: VoxelWorld;
-  anchors: Vec3[];
+  vines: Vine[];
   time: number;
 }
 

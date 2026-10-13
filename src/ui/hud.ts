@@ -26,10 +26,8 @@ export class Hud {
   private readonly vignette: HTMLElement;
   private readonly arrow: HTMLElement;
   private readonly labels: HTMLElement;
-  private readonly finisher: HTMLElement;
   private readonly results: HTMLElement;
   private readonly hint: HTMLElement;
-  private finisherUntil = 0;
   private labelPool: HTMLElement[] = [];
   onPlayAgain: () => void = () => {};
   onMenu: () => void = () => {};
@@ -51,17 +49,8 @@ export class Hud {
     this.vignette = el(this.root, 'vignette');
     this.arrow = el(this.root, 'boat-arrow');
     this.arrow.textContent = '➤';
-    this.finisher = el(this.root, 'finisher');
     this.hint = el(this.root, 'hint');
     this.results = el(this.root, 'results');
-  }
-
-  showFinisher(name: string, rarity: string, now: number): void {
-    this.finisher.innerHTML = `<div class="rarity ${rarity}">${rarity.toUpperCase()}</div><div class="name">${name}</div>`;
-    this.finisher.classList.remove('pop');
-    void this.finisher.offsetWidth; // restart the animation
-    this.finisher.classList.add('pop');
-    this.finisherUntil = now + 2.2;
   }
 
   setHint(text: string): void {
@@ -69,7 +58,7 @@ export class Hud {
     this.hint.style.display = text ? '' : 'none';
   }
 
-  update(match: Match, me: Gorilla | Hunter | undefined, project: Project, now: number): void {
+  update(match: Match, me: Gorilla | Hunter | undefined, project: Project, _now: number): void {
     const r = match.round;
     const t = r.timeRemaining;
     const clock = `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
@@ -80,7 +69,6 @@ export class Hud {
     const showAnnounce = match.time < match.announcementUntil && r.phase !== 'ended';
     this.announce.textContent = showAnnounce ? match.announcement : '';
     this.announce.style.opacity = showAnnounce ? '1' : '0';
-    this.finisher.style.display = now < this.finisherUntil ? '' : 'none';
 
     // Round over.
     if (r.phase === 'ended') {
@@ -118,8 +106,8 @@ export class Hud {
       this.prompt.textContent = 'Your gorillas can slap you awake';
     } else {
       this.center.textContent = g.held ? 'Wait in the nest...' : '';
-      const anchor = g.anchorInRange(match.ctx);
-      this.prompt.textContent = anchor ? 'Hold SWIPE to grab the vine' : g.state === 'climb' ? 'Climbing: SPACE/JUMP to leap off' : '';
+      const vine = g.vineInRange(match.ctx);
+      this.prompt.textContent = vine ? 'Hold SWIPE to grab the vine' : g.state === 'swing' ? 'Let go of SWIPE to launch' : g.state === 'climb' ? 'Climbing: SPACE/JUMP to leap off' : '';
     }
   }
 

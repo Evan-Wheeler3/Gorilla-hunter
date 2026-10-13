@@ -134,22 +134,68 @@ describe('gorilla movement on the real island', () => {
     expect(g.body.y).toBeGreaterThan(startY + 6); // and stayed up there
   });
 
-  it('jumps, grabs a vine and swings', () => {
+  /** A vine with open ground for a run-up on its south side. */
+  const openVine = () => {
+    const w = island.world;
+    return island.vines.find((v) => {
+      const g = w.groundHeight(v.x, v.z);
+      if (v.top - g < 11 || v.bottom - g > 4) return false;
+      for (let d = 0; d <= 8; d += 0.5)
+        for (const h of [0.3, 1.5, 2.7]) if (w.solidAt(v.x, g + h, v.z - d) || w.solidAt(v.x, g + h, v.z + d)) return false;
+      return Math.abs(w.groundHeight(v.x, v.z - 8) - g) < 1;
+    })!;
+  };
+
+  it('grabs a vine on the run and swings in a big, smooth arc, then launches', () => {
     const m = practice();
     const g: Gorilla = m.gorillas.get(2)!;
-    const w = island.world;
-    const anchor = island.anchors.find((a) => {
-      const gy = w.groundHeight(a.x, a.z);
-      return a.y - gy > 5 && a.y - gy < 8 && !w.solidAt(a.x, gy + 1, a.z - 1.5) && !w.solidAt(a.x, gy + 3, a.z - 1.5);
-    })!;
-    expect(anchor).toBeTruthy();
-    g.setPosition({ x: anchor.x, y: w.groundHeight(anchor.x, anchor.z - 1.5) + 0.1, z: anchor.z - 1.5 });
-    run(m, 0.3);
-    let swung = false, frame = 0;
-    run(m, 1.2, () => {
-      if (g.state === 'swing') swung = true;
-      return new Map([[2, { ...emptyInput(0), jump: frame++ === 0, primaryHeld: true, moveY: 1 }]]);
+    const vine = openVine();
+    expect(vine).toBeTruthy();
+    const ground = island.world.groundHeight(vine.x, vine.z);
+    g.setPosition({ x: vine.x, y: ground + 0.05, z: vine.z - 8 });
+    run(m, 0.2);
+
+    let swung = false, maxRise = 0, maxJerk = 0, lastSpeed = -1, grabZ = 0, released = false;
+    run(m, 3.5, () => {
+      const swinging = g.state === 'swing';
+      if (swinging && !swung) grabZ = g.body.z;
+      if (swinging) {
+        swung = true;
+        maxRise = Math.max(maxRise, g.body.y - ground);
+        const speed = Math.hypot(g.vel.x, g.vel.y, g.vel.z);
+        if (lastSpeed >= 0) maxJerk = Math.max(maxJerk, Math.abs(speed - lastSpeed));
+        lastSpeed = speed;
+      }
+      // Hold the grab until the forward swing nears its peak, then let go.
+      if (swung && !released && maxRise > 3 && g.vel.y < 2 && g.vel.z > 0) released = true;
+      return new Map([[2, { ...emptyInput(0), moveY: 1, primaryHeld: !released }]]);
+    });
+    run(m, 3, () => new Map([[2, emptyInput(0)]]));
+
+    expect(swung).toBe(true);
+    expect(maxRise).toBeGreaterThan(3); // swung well up off the ground
+    expect(maxJerk).toBeLessThan(2.5); // no snapping: speed changes smoothly frame to frame
+    expect(g.body.z - grabZ).toBeGreaterThan(8); // the release carried it forward
+    expect(g.body.onGround).toBe(true);
+  });
+
+  it('can grab a vine from a standstill and pump it into a swing', () => {
+    const m = practice();
+    const g: Gorilla = m.gorillas.get(2)!;
+    const vine = openVine();
+    const ground = island.world.groundHeight(vine.x, vine.z);
+    g.setPosition({ x: vine.x, y: ground + 0.05, z: vine.z - 1.2 });
+    run(m, 0.2);
+    let maxRise = 0, swung = false;
+    run(m, 4, () => {
+      if (g.state === 'swing') {
+        swung = true;
+        maxRise = Math.max(maxRise, g.body.y - ground);
+      }
+      return new Map([[2, { ...emptyInput(0), moveY: 1, primaryHeld: true }]]);
     });
     expect(swung).toBe(true);
+    expect(g.state).toBe('swing');
+    expect(maxRise).toBeGreaterThan(2);
   });
 });
