@@ -204,7 +204,8 @@ export class WorldView {
       transparent: true,
       depthWrite: false,
       side: THREE.DoubleSide,
-      blending: THREE.AdditiveBlending,
+      toneMapped: false,
+      fog: false,
       uniforms: { time: { value: 0 } },
       vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
       fragmentShader: `uniform float time; varying vec2 vUv;
@@ -214,11 +215,15 @@ export class WorldView {
         void main(){
           vec2 p = vec2(vUv.x * 160.0, vUv.y * 4.0 - time * 1.6);
           float n = noise(p) * 0.6 + noise(p * 2.3 + 7.0) * 0.4;
-          float body = smoothstep(1.0, 0.0, vUv.y) * (0.55 + n);
-          float tongues = smoothstep(0.35, 0.95, n - vUv.y * 0.9);
-          float a = clamp(body * 0.55 + tongues, 0.0, 1.0) * smoothstep(1.0, 0.75, vUv.y);
-          vec3 c = mix(vec3(1.0,0.25,0.02), vec3(1.0,0.85,0.3), clamp(tongues + (1.0 - vUv.y) * 0.3, 0.0, 1.0));
-          gl_FragColor = vec4(c * a, a);
+          // A solid band of fire at the bottom, licking tongues above it, smoke-dark tips.
+          float h = vUv.y;
+          float flame = n * 1.25 - h * 1.35 + 0.45;
+          float a = smoothstep(0.0, 0.25, flame);
+          float core = smoothstep(0.35, 0.8, flame);
+          vec3 c = mix(vec3(0.85, 0.12, 0.02), vec3(1.0, 0.55, 0.08), core);
+          c = mix(c, vec3(1.0, 0.92, 0.55), smoothstep(0.75, 1.1, flame));
+          c *= 1.6;
+          gl_FragColor = vec4(c, a * 0.92);
         }`,
     });
     this.fireWall = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 1, 96, 1, true), this.fireWallMat);

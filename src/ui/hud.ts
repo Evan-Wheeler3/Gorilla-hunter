@@ -158,7 +158,8 @@ export class Hud {
     if (t < g.streakRageUntil) badges.push(['rage', `RAMPAGE ${Math.ceil(g.streakRageUntil - t)}s`]);
     else if (g.lastStand) badges.push(['rage', 'LAST STAND']);
     else if (g.streak > 0) badges.push(['streak', `${g.streak}/3 kills`]);
-    if (g.wakeRoarReady) badges.push(['roar', 'WAKE ROAR ready']);
+    const teammateDown = [...match.gorillas.values()].some((o) => o !== g && o.sedation.isDown);
+    if (g.wakeRoarReady && teammateDown) badges.push(['roar', 'WAKE ROAR ready: slap them up']);
     if (g.netted(t)) badges.push(['net', 'NETTED!']);
     if (t < g.revealedUntil) badges.push(['seen', 'SPOTTED']);
     this.setBadges(badges);

@@ -305,7 +305,7 @@ body,
 
 .badges {
   position: absolute;
-  top: calc(max(10px, env(safe-area-inset-top)) + 64px);
+  top: calc(max(10px, env(safe-area-inset-top)) + 104px);
   left: 50%;
   transform: translateX(-50%);
   display: flex;
