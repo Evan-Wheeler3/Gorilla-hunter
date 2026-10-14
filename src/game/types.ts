@@ -15,6 +15,9 @@ export interface InputFrame {
   aim: boolean; // held (hunter aims down sights)
   interact: boolean; // pressed this frame
   interactHeld: boolean;
+  /** Hunter tools, pressed this frame: lay a net trap, fire a flare. */
+  net: boolean;
+  flare: boolean;
   /** Where the crosshair points in the world (hunter darts fly toward it). */
   aimPoint: Vec3 | null;
 }
@@ -32,6 +35,8 @@ export const emptyInput = (yaw = 0, pitch = 0): InputFrame => ({
   aim: false,
   interact: false,
   interactHeld: false,
+  net: false,
+  flare: false,
   aimPoint: null,
 });
 

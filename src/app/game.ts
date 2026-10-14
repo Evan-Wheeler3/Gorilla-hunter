@@ -1,17 +1,19 @@
 import * as THREE from 'three';
 import { config } from '../core/config';
-import type { Gorilla } from '../game/gorilla';
+import { Gorilla } from '../game/gorilla';
 import type { Hunter } from '../game/hunter';
-import { Match, type MatchOptions } from '../game/match';
+import { Match, type MatchEffect, type MatchOptions } from '../game/match';
 import { forwardOf, rightOf, type InputFrame } from '../game/types';
 import { rayBox } from '../game/match';
 import { Bots } from '../game/bots';
 import { sound } from '../audio/sound';
 import { Controls } from '../input/controls';
-import { GorillaRig, HunterRig } from '../render/characters';
+import { GORILLA_STYLES, GorillaRig, HUNTER_OUTFITS, HunterRig, type GorillaStyle, type HunterOutfit } from '../render/characters';
 import { Effects } from '../render/effects';
 import { FinisherDirector } from '../render/finishers';
 import { WorldView } from '../render/worldView';
+import { HazardView } from '../render/hazards';
+import { Wildlife } from '../render/wildlife';
 import { Hud } from '../ui/hud';
 import type { Island } from '../world/island';
 
@@ -24,6 +26,8 @@ export interface GameOptions {
   match: MatchOptions;
   localId: number;
   quality: 'high' | 'low';
+  /** Each player's look; anyone left out (bots) gets one picked from their id. */
+  styles?: Map<number, { gorilla: GorillaStyle; hunter: HunterOutfit }>;
 }
 
 /**
@@ -41,6 +45,8 @@ export class Game {
   private readonly world: WorldView;
   private readonly effects: Effects;
   private readonly finishers: FinisherDirector;
+  private hazards: HazardView;
+  private readonly wildlife: Wildlife;
   private readonly rigs = new Map<number, { team: string; rig: GorillaRig | HunterRig }>();
   private readonly ropes = new Map<number, THREE.Mesh>();
   private readonly ropeGeo = new THREE.CylinderGeometry(0.05, 0.05, 1, 6);
@@ -64,6 +70,11 @@ export class Game {
     new THREE.MeshBasicMaterial({ color: 0xff4fa0, transparent: true, opacity: 0.9, depthTest: false, side: THREE.DoubleSide }),
   );
   private bots = new Bots();
+  /** Cinematic orbit around a rare finisher the local player is in. */
+  private cinematic: { center: THREE.Vector3; start: number; duration: number; yaw: number } | null = null;
+  /** Kills this round, scored for the best-kill replay at the end. */
+  private kills: { e: Extract<MatchEffect, { type: 'kill' }>; score: number; killerName: string }[] = [];
+  private replay: { e: Extract<MatchEffect, { type: 'kill' }>; rig: GorillaRig; stub: Gorilla; t: number; loop: number; name: string } | null = null;
   private hitStop = 0; // real seconds the action freezes on a big hit
   private lastGoreSound = -1;
   private readonly audioState = new Map<number, { stride: number; dashing: boolean; loaded: boolean }>();
@@ -119,6 +130,10 @@ export class Game {
       sound.splat(at, count >= 40);
     };
     this.match = new Match(options.island, options.match);
+    this.hazards = new HazardView(this.scene, this.effects);
+    this.wildlife = new Wildlife(this.scene, options.island);
+    this.wildlife.onScatter = (at) => sound.flock(at);
+    this.world.setWeather(this.match.weather);
     this.resetCameraToPlayer();
     this.aimArc.frustumCulled = false;
     this.aimImpact.renderOrder = 10;
@@ -160,7 +175,13 @@ export class Game {
       rig.dispose();
     }
     this.rigs.clear();
+    this.stopReplay();
+    this.kills = [];
+    this.cinematic = null;
     this.match = new Match(this.options.island, this.options.match);
+    this.hazards.dispose();
+    this.hazards = new HazardView(this.scene, this.effects);
+    this.world.setWeather(this.match.weather);
     this.bots = new Bots();
     this.resetCameraToPlayer();
   }
@@ -213,6 +234,8 @@ export class Game {
         aim: control.aim,
         interact: first && control.interact,
         interactHeld: control.interactHeld,
+        net: first && control.net,
+        flare: first && control.flare,
         aimPoint: first && control.primary ? this.aimPoint() : null,
       };
       for (const c of [...this.match.gorillas.values(), ...this.match.hunters.values()]) this.prevPos.set(c.id, { x: c.body.x, y: c.body.y, z: c.body.z });
@@ -222,7 +245,7 @@ export class Game {
       this.accumulator -= SIM_DT;
       first = false;
     }
-    if (first && (control.jump || control.dash || control.primary || control.interact)) {
+    if (first && (control.jump || control.dash || control.primary || control.interact || control.net || control.flare)) {
       // A frame without a sim step: keep one-shot presses for the next frame.
       this.controls.requeue(control);
     }
@@ -231,6 +254,8 @@ export class Game {
     this.consumeEffects();
     this.syncRigs(dt);
     this.finishers.update(dt, this.time);
+    this.updateReplay(dt);
+    this.hud.root.classList.toggle('cinematic', !!this.cinematic || !!this.replay);
     this.updateCamera(realDt);
     this.updateLookScale();
     this.updateAimArc();
@@ -238,7 +263,15 @@ export class Game {
     this.updateKillRing();
     this.effects.update(dt, this.match.darts);
     const focus = me ? new THREE.Vector3(me.body.x, 0, me.body.z) : this.camera.position;
-    this.world.update(this.time, focus, this.camera.position);
+    const fire = this.match.wildfire;
+    const fireSpan = config.match.roundSeconds - config.match.fireStartSeconds;
+    this.world.update(this.time, focus, this.camera.position, {
+      center: fire.center,
+      radius: this.match.fireRadius,
+      progress: Math.min(1, Math.max(0, (this.match.round.roundTime - config.match.fireStartSeconds) / fireSpan)),
+    });
+    this.hazards.update(this.match, me ? me.team : null, this.options.localId, this.camera, this.time, dt);
+    this.wildlife.update(this.match, dt, this.time);
     this.updateAnchorMarker();
 
     const project = (x: number, y: number, z: number) => {
@@ -253,11 +286,19 @@ export class Game {
 
   private consumeEffects(): void {
     const id = this.options.localId;
-    for (const e of this.match.effects.splice(0)) {
+    for (const raw of this.match.effects.splice(0)) {
+      // Kills carry the victim's outfit to the finisher, so the right hunter comes apart.
+      const e = raw.type === 'kill' ? { ...raw, outfit: this.styleOf(raw.victim).hunter } : raw;
       switch (e.type) {
         case 'kill': {
           const rig = this.rigs.get(e.killer)?.rig;
-          if (e.dash) {
+          this.recordKill(e);
+          const rarity = e.pick.finisher.rarity;
+          if (e.finisher && (rarity === 'rare' || rarity === 'legendary') && (e.killer === id || e.victim === id) && rig instanceof GorillaRig)
+            this.cinematic = { center: new THREE.Vector3(e.killerAt.x, e.killerAt.y, e.killerAt.z), start: this.time, duration: e.pick.finisher.duration, yaw: e.yaw };
+          if (e.pound) this.finishers.poundKill(e, id);
+          else if (e.burn) this.finishers.burnKill(e);
+          else if (e.dash) {
             this.finishers.dashKill({ ...e, dash: e.dash }, id);
             if (e.killer === id || e.victim === id) this.hitStop = 0.09;
           }
@@ -286,6 +327,56 @@ export class Game {
           this.effects.confetti(e.at);
           sound.convert(e.at);
           break;
+        case 'pound': {
+          this.effects.shockwave(e.at, 6 + Math.min(6, e.height * 0.4));
+          sound.pound(e.at);
+          const me = this.me;
+          const d = me ? Math.hypot(me.body.x - e.at.x, me.body.z - e.at.z) : 99;
+          this.effects.shake = Math.max(this.effects.shake, Math.max(0, 1 - d / 25));
+          if (e.gorilla === id) this.hitStop = 0.06;
+          break;
+        }
+        case 'leaves':
+          this.effects.leaves(e.at, e.count, e.burnt);
+          sound.rustle(e.at, e.count > 10);
+          break;
+        case 'crater':
+          this.effects.dust(e.at, 10);
+          break;
+        case 'netPlaced':
+          sound.netPlace(e.at);
+          break;
+        case 'netSprung':
+          sound.netSnap(e.at);
+          this.effects.dust(e.at, 8);
+          break;
+        case 'flare': {
+          sound.flare(e.hunter === id ? null : e.at);
+          break;
+        }
+        case 'lightning':
+          this.world.lightning(e.at);
+          sound.thunder();
+          break;
+        case 'wakeRoar': {
+          this.effects.wakeRoar(e.at);
+          sound.roar(e.at, true);
+          break;
+        }
+        case 'chargeDrop':
+          this.effects.dust(e.at, 10);
+          sound.slap(e.at);
+          if (e.hunter === id) this.effects.shake = Math.max(this.effects.shake, 0.5);
+          break;
+        case 'streak': {
+          const g = this.match.gorillas.get(e.gorilla);
+          if (g) {
+            sound.roar(g.body, true);
+            this.effects.burst({ x: g.body.x, y: g.body.y + 2, z: g.body.z }, [0xff3b2a, 0xff9a3d, 0xffd34d], 50, 8, { x: 0, y: 4, z: 0 }, 0.14);
+            if (e.gorilla === id) this.effects.shake = Math.max(this.effects.shake, 0.6);
+          }
+          break;
+        }
         case 'swipe': {
           const g = this.match.gorillas.get(e.gorilla);
           if (g) sound.swipe(g.body);
@@ -295,6 +386,7 @@ export class Game {
           const me = this.me;
           const won = !!me && ((e.result === 'huntersWin') === (me.team === 'hunter'));
           sound.jingle(won);
+          this.startReplay();
           break;
         }
         case 'thrownOff':
@@ -324,7 +416,8 @@ export class Game {
         entry = undefined;
       }
       if (!entry) {
-        entry = { team: c.team, rig: c.team === 'gorilla' ? new GorillaRig() : new HunterRig() };
+        const look = this.styleOf(c.id);
+        entry = { team: c.team, rig: c.team === 'gorilla' ? new GorillaRig(look.gorilla) : new HunterRig(look.hunter) };
         this.scene.add(entry.rig.root);
         this.rigs.set(c.id, entry);
       }
@@ -392,6 +485,9 @@ export class Game {
   private updateAudio(): void {
     sound.setListener(this.camera.position.x, this.camera.position.y, this.camera.position.z, this.controls.yaw);
     sound.update();
+    const fire = this.match.wildfire;
+    const toRing = fire.active ? Math.abs(Math.hypot(this.camera.position.x - fire.center.x, this.camera.position.z - fire.center.z) - this.match.fireRadius) : 99;
+    sound.setBeds(this.match.weather === 'storm' ? 1 : 0, Math.max(0, 1 - toRing / 30));
     for (const c of [...this.match.gorillas.values(), ...this.match.hunters.values()]) {
       let st = this.audioState.get(c.id);
       if (!st) {
@@ -400,7 +496,11 @@ export class Game {
       }
       const gorilla = c.team === 'gorilla';
       const stepLen = gorilla ? 1.2 : c.team === 'hunter' && c.sprinting ? 0.95 : 0.75;
-      if (Math.floor(c.stride / stepLen) !== Math.floor(st.stride / stepLen) && c.body.onGround) sound.footstep(c.body, gorilla);
+      const step = Math.floor(c.stride / stepLen);
+      if (step !== Math.floor(st.stride / stepLen) && c.body.onGround) {
+        sound.footstep(c.body, gorilla);
+        this.wildlife.footprint(c.body.x, c.body.y, c.body.z, c.yaw, gorilla, step % 2 ? 1 : -1);
+      }
       st.stride = c.stride;
       if (c.team === 'gorilla') {
         if (c.dashing && !st.dashing) {
@@ -415,10 +515,68 @@ export class Game {
     }
     // Final ten seconds of the round.
     const left = Math.ceil(this.match.round.timeRemaining);
-    if (this.match.round.phase === 'hunt' && left <= 10 && left > 0 && left !== this.lastBeep) {
+    const phase = this.match.round.phase;
+    if ((phase === 'hunt' || phase === 'wildfire') && left <= 10 && left > 0 && left !== this.lastBeep) {
       this.lastBeep = left;
       sound.beep(left <= 3);
     }
+  }
+
+  private styleOf(id: number): { gorilla: GorillaStyle; hunter: HunterOutfit } {
+    const set = this.options.styles?.get(id);
+    if (set) return set;
+    return { gorilla: GORILLA_STYLES[(id * 7) % GORILLA_STYLES.length].id, hunter: HUNTER_OUTFITS[(id * 5) % HUNTER_OUTFITS.length].id };
+  }
+
+  private recordKill(e: Extract<MatchEffect, { type: 'kill' }>): void {
+    if (e.burn) return;
+    const rarity = e.pick.finisher.rarity;
+    const score = e.pound ? 3.5 : e.dash ? 3 : !e.finisher ? 0.5 : rarity === 'legendary' ? 5 : rarity === 'rare' ? 4 : rarity === 'uncommon' ? 2 : 1;
+    const killer = this.match.gorillas.get(e.killer);
+    this.kills.push({ e, score, killerName: killer?.name ?? '' });
+  }
+
+  /** At the end of the round, restage the best kill behind the results. */
+  private startReplay(): void {
+    if (!this.kills.length || this.debugView) return;
+    let best = this.kills[0];
+    for (const k of this.kills) if (k.score >= best.score) best = k;
+    const e = best.e;
+    const stub = new Gorilla(-1000, 'replay', e.killerAt, { swipe: () => {}, groundPound: () => {}, smash: () => {} });
+    stub.yaw = e.yaw;
+    stub.body.onGround = true;
+    const rig = new GorillaRig(this.styleOf(e.killer).gorilla);
+    this.scene.add(rig.root);
+    this.replay = { e, rig, stub, t: 0, loop: e.finisher ? e.pick.finisher.duration + 1.4 : 2.6, name: best.killerName };
+    this.playReplayOnce();
+  }
+
+  private playReplayOnce(): void {
+    const r = this.replay;
+    if (!r) return;
+    const e = { ...r.e, killer: -1000, victim: -1000 };
+    r.t = 0;
+    if (r.e.pound) this.finishers.poundKill(e, -999);
+    else if (r.e.dash) this.finishers.dashKill({ ...e, dash: r.e.dash }, -999);
+    else this.finishers.start(e, r.rig, -999);
+    this.hud.setReplay(`BEST KILL${r.name ? ' · ' + r.name : ''}`);
+  }
+
+  private updateReplay(dt: number): void {
+    const r = this.replay;
+    if (!r) return;
+    r.t += dt;
+    r.rig.update(r.stub, dt, this.time, this.finishers.poseFor(-1000));
+    r.rig.root.position.set(r.e.killerAt.x, r.e.killerAt.y, r.e.killerAt.z);
+    if (r.t > r.loop) this.playReplayOnce();
+  }
+
+  private stopReplay(): void {
+    if (!this.replay) return;
+    this.replay.rig.root.removeFromParent();
+    this.replay.rig.dispose();
+    this.replay = null;
+    this.hud.setReplay(null);
   }
 
   /** Where to draw a character: between its last two sim positions, so motion is smooth at any frame rate. */
@@ -501,6 +659,29 @@ export class Game {
   }
 
   private updateCamera(dt: number): void {
+    if (this.replay) {
+      // Slow orbit round the best kill.
+      const r = this.replay;
+      const c = new THREE.Vector3(r.e.killerAt.x, r.e.killerAt.y + 1.4, r.e.killerAt.z);
+      const a = r.e.yaw + Math.PI / 2 + Math.sin(this.time * 0.25) * 0.9;
+      this.camera.position.set(c.x + Math.sin(a) * 6.5, c.y + 1.6, c.z + Math.cos(a) * 6.5);
+      this.camera.lookAt(c);
+      return;
+    }
+    if (this.cinematic && !this.debugView) {
+      const cm = this.cinematic;
+      const k = (this.time - cm.start) / cm.duration;
+      if (k >= 1) this.cinematic = null;
+      else {
+        // Swing round the action from the side to the front, low and close.
+        const a = cm.yaw + Math.PI / 2 + k * 1.9;
+        const c = cm.center.clone().add(new THREE.Vector3(0, 1.4, 0)).addScaledVector(new THREE.Vector3(Math.sin(cm.yaw), 0, Math.cos(cm.yaw)), 0.8);
+        this.camera.position.set(c.x + Math.sin(a) * 5.2, c.y + 0.9 - k * 0.4, c.z + Math.cos(a) * 5.2);
+        this.camera.lookAt(c);
+        this.camInit = false;
+        return;
+      }
+    }
     if (this.debugView) {
       const { from, to } = this.debugView;
       this.camera.position.set(from.x, from.y, from.z);

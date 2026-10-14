@@ -17,6 +17,12 @@ export enum Block {
   Cloth,
   Crate,
   Flower,
+  /** Wildfire leftovers. */
+  Ash,
+  Charred,
+  BurntLeaves,
+  /** Churned earth in a crater. */
+  Mud,
 }
 
 export interface BlockInfo {
@@ -46,6 +52,10 @@ def(Block.Rock, [0.55, 0.54, 0.52], 0.07);
 def(Block.Cloth, [0.85, 0.78, 0.6], 0.03);
 def(Block.Crate, [0.7, 0.52, 0.3], 0.05);
 def(Block.Flower, [0.98, 0.86, 0.38], 0.2);
+def(Block.Ash, [0.27, 0.25, 0.23], 0.08);
+def(Block.Charred, [0.13, 0.1, 0.09], 0.05, true);
+def(Block.BurntLeaves, [0.42, 0.22, 0.08], 0.12);
+def(Block.Mud, [0.36, 0.25, 0.16], 0.07);
 
 export function blockInfo(b: number): BlockInfo {
   return info[b] ?? info[Block.Stone];

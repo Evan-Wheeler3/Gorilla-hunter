@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { FinisherPick } from '../core/finishers';
 import { Rng } from '../core/rng';
-import { GORE_COLORS, HEAD_COLORS, HUNTER_DEBRIS_COLORS, HunterRig, type GorillaPose, type GorillaRig } from './characters';
+import { GORE_COLORS, HEAD_COLORS, HUNTER_DEBRIS_COLORS, HunterRig, type GorillaPose, type GorillaRig, type HunterOutfit } from './characters';
 import type { Effects } from './effects';
 import { config } from '../core/config';
 
@@ -514,6 +514,8 @@ export interface FinisherStart {
   killerAt: { x: number; y: number; z: number };
   yaw: number;
   pick: FinisherPick;
+  /** The victim's outfit, so the right hunter comes apart. */
+  outfit?: HunterOutfit;
 }
 
 /**
@@ -541,7 +543,7 @@ export class FinisherDirector {
     const script = SCRIPTS[kill.pick.finisher.id] ?? SCRIPTS.rip_in_half;
     this.stop(kill.killer);
 
-    const puppet = new HunterRig();
+    const puppet = new HunterRig(kill.outfit);
     this.scene.add(puppet.root);
     const origin = v3(kill.killerAt.x, kill.killerAt.y, kill.killerAt.z);
     const forward = v3(Math.sin(kill.yaw), 0, Math.cos(kill.yaw));
@@ -636,7 +638,7 @@ export class FinisherDirector {
    */
   dashKill(kill: FinisherStart & { dash: { x: number; z: number } }, localId: number): void {
     const rng = new Rng(kill.pick.seed);
-    const puppet = new HunterRig();
+    const puppet = new HunterRig(kill.outfit);
     this.scene.add(puppet.root);
     puppet.setScream(true);
     puppet.root.position.set(kill.at.x, kill.at.y, kill.at.z);
@@ -697,6 +699,46 @@ export class FinisherDirector {
     }
     fx.shake = Math.max(fx.shake, 0.5);
     this.onClimax(kill.killer === localId || kill.victim === localId);
+  }
+
+  /** Crushed by a ground pound: squashed flat, then everything squirts out sideways. */
+  poundKill(kill: FinisherStart, localId: number): void {
+    const rng = new Rng(kill.pick.seed);
+    const puppet = new HunterRig(kill.outfit);
+    this.scene.add(puppet.root);
+    puppet.root.position.set(kill.at.x, kill.at.y, kill.at.z);
+    puppet.root.rotation.y = rng.next() * Math.PI * 2;
+    const hs = puppet.root.scale.x;
+    puppet.root.scale.set(hs * 1.7, hs * 0.12, hs * 1.7); // pancake
+    const at = v3(kill.at.x, kill.at.y + 0.3, kill.at.z);
+    const fx = this.effects;
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2 + rng.next() * 0.5;
+      fx.burst(at, GORE_COLORS, 22, 4, { x: Math.cos(a) * 11, y: 1.5, z: Math.sin(a) * 11 }, 0.2);
+    }
+    fx.burst(at, HUNTER_DEBRIS_COLORS, 40, 8, { x: 0, y: 5, z: 0 });
+    // The helmet pops up out of the mess.
+    fx.addChunk(puppet.helmet, v3(rng.range(-2, 2), 11, rng.range(-2, 2)), v3(9, 4, 7), { life: 4, radius: 0.15 });
+    this.onVoice('scream', at);
+    // The pancake lingers a moment, then goes.
+    fx.addChunk(puppet.root, v3(0, 0, 0), v3(0, 0, 0), { life: 2.5, radius: 0.02, trail: false });
+    this.onClimax(kill.killer === localId || kill.victim === localId);
+  }
+
+  /** Caught by the wildfire: blackened, he collapses into ash and embers. */
+  burnKill(kill: FinisherStart): void {
+    const puppet = new HunterRig(kill.outfit);
+    this.scene.add(puppet.root);
+    puppet.root.position.set(kill.at.x, kill.at.y, kill.at.z);
+    puppet.root.rotation.y = kill.yaw;
+    puppet.setCharred();
+    puppet.setScream(true);
+    this.onVoice('scream', v3(kill.at.x, kill.at.y, kill.at.z));
+    const at = v3(kill.at.x, kill.at.y + 1, kill.at.z);
+    this.effects.burst(at, [0x1a1412, 0x2a2420, 0x4a403a, 0xff8a1e], 60, 3, { x: 0, y: 1, z: 0 }, 0.14);
+    for (let i = 0; i < 25; i++) this.effects.flame(v3(kill.at.x, kill.at.y + Math.random() * 2, kill.at.z), 0.8, 2);
+    // Topples over, then crumbles.
+    this.effects.addChunk(puppet.root, v3(0, 0.5, 0), v3(2.5, 0, 0), { life: 1.4, burstColors: [0x1a1412, 0x3a3230, 0x6a625c], fuse: 1.2, radius: 0.35 });
   }
 
   /** Pose override for a gorilla's rig while its finisher plays (undefined otherwise). */

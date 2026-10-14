@@ -272,6 +272,98 @@ export class Sound {
     this.noise(o, this.now(), heavy ? 0.09 : 0.05, { type: 'lowpass', freq: heavy ? 500 : 900, gain: 1 });
   }
 
+  /** Ground pound: a deep boom with a crack on top. */
+  pound(at: V): void {
+    const o = this.out(at, 1, 120);
+    if (!o) return;
+    const t = this.now();
+    this.tone(o, t, 0.6, { type: 'sine', freq: 70, freqEnd: 28, gain: 1 });
+    this.noise(o, t, 0.5, { type: 'lowpass', freq: 900, freqEnd: 120, gain: 1 });
+    this.noise(o, t, 0.08, { type: 'highpass', freq: 2000, gain: 0.6 });
+  }
+
+  rustle(at: V, big: boolean): void {
+    const o = this.out(at, big ? 0.5 : 0.3, 50);
+    if (!o) return;
+    const t = this.now();
+    for (let i = 0; i < 3; i++) this.noise(o, t + i * 0.05, 0.18, { type: 'bandpass', freq: 3500 + Math.random() * 1500, q: 0.8, gain: 0.7 });
+  }
+
+  /** A net springs shut: a whip and a creak. */
+  netSnap(at: V): void {
+    const o = this.out(at, 0.7);
+    if (!o) return;
+    const t = this.now();
+    this.noise(o, t, 0.12, { type: 'bandpass', freq: 1800, freqEnd: 600, q: 2, gain: 1 });
+    this.tone(o, t + 0.05, 0.3, { type: 'triangle', freq: 220, freqEnd: 160, gain: 0.3 });
+  }
+
+  netPlace(at: V): void {
+    const o = this.out(at, 0.3, 30);
+    if (!o) return;
+    this.noise(o, this.now(), 0.15, { type: 'lowpass', freq: 1200, gain: 0.6 });
+  }
+
+  /** Flare: a hiss up, then a pop. */
+  flare(at: V | null): void {
+    const o = this.out(at, 0.7, 120);
+    if (!o) return;
+    const t = this.now();
+    this.noise(o, t, 0.6, { type: 'bandpass', freq: 1500, freqEnd: 4000, q: 1, attack: 0.05, gain: 0.7 });
+    this.tone(o, t + 0.6, 0.15, { type: 'square', freq: 300, freqEnd: 120, gain: 0.4 });
+    this.noise(o, t + 0.6, 0.3, { type: 'lowpass', freq: 1500, gain: 0.8 });
+  }
+
+  /** Thunder: a crack, then a long low rumble. */
+  thunder(): void {
+    const o = this.out(null, 0.9);
+    if (!o) return;
+    const t = this.now();
+    this.noise(o, t, 0.25, { type: 'highpass', freq: 800, gain: 0.7 });
+    this.noise(o, t + 0.1, 2.6, { type: 'lowpass', freq: 400, freqEnd: 60, attack: 0.2, gain: 1 });
+  }
+
+  /** Weather beds: rain hiss, and the fire's crackle when close (0..1 each). Called every frame. */
+  setBeds(rain: number, fire: number): void {
+    const c = this.ctx;
+    if (!c || !this.master) return;
+    if (!this.beds) {
+      const make = (type: BiquadFilterType, freq: number) => {
+        const src = c.createBufferSource();
+        src.buffer = this.noiseBuf;
+        src.loop = true;
+        const f = c.createBiquadFilter();
+        f.type = type;
+        f.frequency.value = freq;
+        const g = c.createGain();
+        g.gain.value = 0;
+        src.connect(f).connect(g).connect(this.master!);
+        src.start();
+        return g;
+      };
+      this.beds = { rain: make('highpass', 1800), fire: make('lowpass', 700) };
+    }
+    const now = c.currentTime;
+    this.beds.rain.gain.setTargetAtTime(this.muted ? 0 : rain * 0.12, now, 0.3);
+    this.beds.fire.gain.setTargetAtTime(this.muted ? 0 : fire * 0.3, now, 0.2);
+    // Crackles over the roar.
+    if (fire > 0.1 && Math.random() < fire * 0.3) {
+      const o = this.out(null, fire * 0.25);
+      if (o) this.noise(o, this.now(), 0.03, { type: 'highpass', freq: 2500 + Math.random() * 2000, gain: 1 });
+    }
+  }
+
+  private beds: { rain: GainNode; fire: GainNode } | null = null;
+
+  /** A flock bursting out of the canopy: a flurry of alarm calls and wingbeats. */
+  flock(at: V): void {
+    for (let i = 0; i < 3; i++) this.bird(at);
+    const o = this.out(at, 0.35, 70);
+    if (!o) return;
+    const t = this.now();
+    for (let i = 0; i < 8; i++) this.noise(o, t + i * 0.06, 0.05, { type: 'bandpass', freq: 900, q: 1.5, gain: 0.6 });
+  }
+
   private bird(at: V): void {
     const o = this.out(at, 0.12, 80);
     if (!o) return;

@@ -144,12 +144,24 @@ export class Bots {
     return match.ctx.world.raycast(from.x, from.y, from.z, dx / d, dy / d, dz / d, d - 0.5) < 0;
   }
 
+  /** When the wildfire is close, the only goal is getting inside the ring. */
+  private fleeFire(match: Match, b: Brain, body: { x: number; y: number; z: number; height: number }, input: InputFrame): boolean {
+    const fire = match.wildfire;
+    if (!fire.active) return false;
+    const d = Math.hypot(body.x - fire.center.x, body.z - fire.center.z);
+    if (d < match.fireRadius - 5) return false;
+    this.steer(match, b, body, fire.center, input);
+    input.sprint = true;
+    return true;
+  }
+
   // ------------------------------------------------------------------ Hunters
 
   private hunter(match: Match, h: Hunter, dt: number): InputFrame {
     const b = this.brain(h.id, h.body);
     const input = emptyInput(h.yaw, 0);
     if (h.dead || h.held) return input;
+    if (this.fleeFire(match, b, h.body, input)) return input;
     const eye = { x: h.body.x, y: h.body.y + h.body.height * 0.9, z: h.body.z };
 
     // 1. Dragging: haul it to the nearest boat, sprinting.
@@ -182,8 +194,16 @@ export class Bots {
       return input;
     }
 
-    // 3. Hunt: the nearest gorilla in sight.
-    const visible = [...match.gorillas.values()].filter((g) => !g.sedation.isDown && flat(h.body, g.body) < this.skill.sight && this.canSee(match, eye, centre(g)));
+    // 3. Hunt: the nearest gorilla in sight (or lit up by a flare or lightning). Mist cuts sight.
+    const t = match.ctx.time;
+    const sight = this.skill.sight * (match.weather === 'mist' ? 0.55 : 1);
+    const visible = [...match.gorillas.values()].filter(
+      (g) => !g.sedation.isDown && flat(h.body, g.body) < sight && (t < g.revealedUntil || this.canSee(match, eye, centre(g))),
+    );
+    // A gorilla charging in close: drop a net in its path. Nothing seen for a while: fire a flare.
+    const close = nearestOf(visible, h.body);
+    if (close && flat(h.body, close.body) < 9 && h.netCooldown <= 0 && b.rng.next() < 0.05) input.net = true;
+    if (!close && h.flareCooldown <= 0 && b.rng.next() < 0.004) input.flare = true;
     const target = nearestOf(visible, h.body);
     if (target) {
       if (b.targetId !== target.id) b.seenFor = 0;
@@ -240,7 +260,13 @@ export class Bots {
   private gorilla(match: Match, g: Gorilla, _dt: number): InputFrame {
     const b = this.brain(g.id, g.body);
     const input = emptyInput(g.yaw, 0);
-    if (g.sedation.isDown || g.held || g.inFinisher) return input;
+    // Being dragged: fight it.
+    if (g.sedation.isDown && g.draggedBy !== null) {
+      input.primary = b.rng.next() < 0.25;
+      return input;
+    }
+    if (g.sedation.isDown || g.held || g.inFinisher || g.netted(match.ctx.time)) return input;
+    if (this.fleeFire(match, b, g.body, input)) return input;
     const t = match.ctx.time;
 
     // Opening seconds: scatter away from the hunters.

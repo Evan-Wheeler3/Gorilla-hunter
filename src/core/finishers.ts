@@ -22,10 +22,10 @@ export const LAUNCH_FINISHERS: FinisherDefinition[] = [
   { id: 'rip_in_half', name: 'Rip in Half', rarity: 'common', duration: 2.0 },
   { id: 'head_pop', name: 'Head Pop', rarity: 'common', duration: 1.9 },
   { id: 'arm_rip', name: 'Arm Rip', rarity: 'common', duration: 2.4 },
-  { id: 'twirl_and_throw', name: 'Twirl and Throw', rarity: 'common', duration: 2.4 },
+  { id: 'twirl_and_throw', name: 'Twirl and Throw', rarity: 'rare', duration: 2.4 },
   { id: 'crumple_ball', name: 'Crumple Ball', rarity: 'uncommon', duration: 2.2 },
   { id: 'head_clap', name: 'Head Clap', rarity: 'uncommon', duration: 1.8 },
-  { id: 'ragdoll_slam', name: 'Ragdoll Slam', rarity: 'uncommon', duration: 2.6 },
+  { id: 'ragdoll_slam', name: 'Ragdoll Slam', rarity: 'rare', duration: 2.6 },
   { id: 'drum_solo', name: 'Drum Solo', rarity: 'legendary', duration: 3.0 },
 ];
 
@@ -47,6 +47,20 @@ export class FinisherSelector {
   ) {
     if (catalog.length === 0) throw new Error('Finisher catalog is empty.');
     this.rng = new Rng(seed);
+  }
+
+  /** Kill-streak rage: only rare and legendary finishers (never the same one twice running). */
+  pickTop(gorillaId: number): FinisherPick {
+    const last = this.lastByGorilla.get(gorillaId);
+    const top = this.catalog.filter((f) => f.rarity === 'rare' || f.rarity === 'legendary');
+    if (top.length === 0) return this.pick(gorillaId, true);
+    const fresh = top.filter((f) => f.id !== last);
+    const list = fresh.length ? fresh : top;
+    const chosen = list[this.rng.int(list.length)];
+    this.lastByGorilla.set(gorillaId, chosen.id);
+    this.recent.push(chosen.id);
+    while (this.recent.length > Math.max(0, this.stats.matchNoRepeatWindow)) this.recent.shift();
+    return { finisher: chosen, seed: this.rng.seed() };
   }
 
   pick(gorillaId: number, rage: boolean): FinisherPick {

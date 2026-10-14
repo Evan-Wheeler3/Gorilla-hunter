@@ -14,9 +14,11 @@ export interface ControlState {
   aim: boolean;
   interact: boolean;
   interactHeld: boolean;
+  net: boolean;
+  flare: boolean;
 }
 
-type ButtonId = 'jump' | 'action' | 'grab' | 'dash' | 'aim';
+type ButtonId = 'jump' | 'action' | 'grab' | 'dash' | 'aim' | 'net' | 'flare';
 
 const PITCH_MIN = -1.1, PITCH_MAX = 0.9;
 const HAS_POINTER = typeof window !== 'undefined' && 'PointerEvent' in window;
@@ -47,6 +49,7 @@ export class Controls {
   private requeued: Partial<ControlState> = {};
   /** Look sensitivity multiplier, set by the game each frame (lower while aiming, near a target). */
   lookScale = 1;
+  private labelled = false;
   private aimLatched = false;
   private aimDownAt = 0;
   private actionLook = { id: -1, x: 0, y: 0 };
@@ -94,6 +97,8 @@ export class Controls {
       ['grab', 'btn-grab'],
       ['dash', 'btn-dash'],
       ['aim', 'btn-aim'],
+      ['net', 'btn-net'],
+      ['flare', 'btn-flare'],
     ];
     for (const [id, cls] of buttons) {
       const el = div(overlay, `touch-btn ${cls}`);
@@ -201,6 +206,8 @@ export class Controls {
 
   /** Relabels the touch buttons for the player's role. */
   setTeam(team: Team): void {
+    if (team === this.team && this.labelled) return;
+    this.labelled = true;
     this.team = team;
     const label = (id: ButtonId, text: string, show = true) => {
       const el = this.buttonEls.get(id)!;
@@ -212,6 +219,8 @@ export class Controls {
     label('grab', 'GRAB', team === 'hunter');
     label('dash', 'DASH', team === 'gorilla');
     label('aim', 'AIM', team === 'hunter');
+    label('net', 'NET', team === 'hunter');
+    label('flare', 'FLARE', team === 'hunter');
     if (team !== 'hunter') this.dropAim();
   }
 
@@ -280,7 +289,7 @@ export class Controls {
 
   /** Keeps one-shot presses for the next read (used when a frame ran no simulation step). */
   requeue(s: ControlState): void {
-    this.requeued = { jump: s.jump, dash: s.dash, primary: s.primary, interact: s.interact };
+    this.requeued = { jump: s.jump, dash: s.dash, primary: s.primary, interact: s.interact, net: s.net, flare: s.flare };
   }
 
   /** Snapshot of this frame's controls; clears one-frame "pressed" flags. */
@@ -320,11 +329,15 @@ export class Controls {
       aim: this.mouseDown[2] || tb('aim').held,
       interact: p('KeyE') || p('KeyF') || tb('grab').pressed,
       interactHeld: k('KeyE') || k('KeyF') || tb('grab').held,
+      net: p('KeyQ') || tb('net').pressed,
+      flare: p('KeyR') || tb('flare').pressed,
     };
     state.jump ||= !!this.requeued.jump;
     state.dash ||= !!this.requeued.dash;
     state.primary ||= !!this.requeued.primary;
     state.interact ||= !!this.requeued.interact;
+    state.net ||= !!this.requeued.net;
+    state.flare ||= !!this.requeued.flare;
     this.requeued = {};
     if (this.override) {
       Object.assign(state, this.override);

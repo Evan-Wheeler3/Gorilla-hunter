@@ -17,6 +17,9 @@ export interface HunterEvents {
   endDrag(h: Hunter): void;
   /** Tie up a knocked-out gorilla (extends the knockout). */
   bind(h: Hunter, gorillaId: number): boolean;
+  /** Lay a net trap at the hunter's feet; false if the hunter has too many out. */
+  placeNet(h: Hunter): boolean;
+  fireFlare(h: Hunter): void;
 }
 
 /**
@@ -41,6 +44,12 @@ export class Hunter {
   /** Downed gorilla in reach (for the prompt). */
   interactTarget: number | null = null;
   bindProgress = 0;
+  netCooldown = 0;
+  /** Seen by gorillas (lightning) until this match time. */
+  revealedUntil = -1;
+  flareCooldown = 0;
+  /** Slows the hunter while a dragged gorilla struggles (0..1, set by the match). */
+  dragResist = 0;
 
   // Animation hints for the view.
   stride = 0;
@@ -124,12 +133,23 @@ export class Hunter {
     if (dt <= 0) return;
     this.stunTimer -= dt;
     if (this.dead || this.stunned || this.held)
-      input = { ...input, moveX: 0, moveY: 0, jump: false, primary: false, interact: false, interactHeld: false, aim: false };
+      input = { ...input, moveX: 0, moveY: 0, jump: false, primary: false, interact: false, interactHeld: false, aim: false, net: false, flare: false };
 
     this.updateMovement(input, dt, ctx);
     if (this.dead) return;
     this.updateInteract(input, dt);
     this.updateRifle(input, dt, ctx);
+    this.updateTools(input, dt);
+  }
+
+  private updateTools(input: InputFrame, dt: number): void {
+    this.netCooldown = Math.max(0, this.netCooldown - dt);
+    this.flareCooldown = Math.max(0, this.flareCooldown - dt);
+    if (input.net && this.netCooldown <= 0 && this.body.onGround && this.events.placeNet(this)) this.netCooldown = H.netCooldown;
+    if (input.flare && this.flareCooldown <= 0) {
+      this.events.fireFlare(this);
+      this.flareCooldown = H.flareCooldown;
+    }
   }
 
   private updateMovement(input: InputFrame, dt: number, ctx: SimContext): void {
@@ -146,7 +166,7 @@ export class Hunter {
     if (!this.dead) this.yaw = turnToward(this.yaw, targetYaw, (this.aiming ? 20 : 12) * dt);
 
     this.sprinting = input.sprint && moving && !this.aiming && H.unlimitedSprint;
-    const speed = (this.sprinting ? H.sprintSpeed : H.walkSpeed) * (this.aiming ? 0.6 : 1);
+    const speed = (this.sprinting ? H.sprintSpeed : H.walkSpeed) * (this.aiming ? 0.6 : 1) * (this.dragging !== null ? 1 - 0.6 * this.dragResist : 1);
     const accel = grounded ? H.groundAcceleration : H.airAcceleration;
     const [hx, hz] = moveToward(this.vel.x, this.vel.z, wishX * speed, wishZ * speed, accel * dt);
 

@@ -48,6 +48,50 @@ export class VoxelWorld {
     if (this.inBounds(ix, iy, iz)) this.data[this.index(ix, iy, iz)] = b;
   }
 
+  // ---- Live edits (craters, smashed leaves, fire), tracked so views can rebuild and rounds reset.
+
+  /** Render chunks ("cx,cy,cz", 16-cell chunks) changed since the view last rebuilt them. */
+  readonly dirtyChunks = new Set<string>();
+  private readonly touchedChunks = new Set<string>();
+  private pristine: Uint8Array | null = null;
+
+  /** Remembers the freshly generated island so later rounds can start from it again. */
+  snapshot(): void {
+    this.pristine = this.data.slice();
+  }
+
+  /** Undoes every live edit since the snapshot. */
+  restore(): void {
+    if (!this.pristine || this.touchedChunks.size === 0) return;
+    this.data.set(this.pristine);
+    for (const k of this.touchedChunks) this.dirtyChunks.add(k);
+    this.touchedChunks.clear();
+  }
+
+  /** Changes one cell during play and marks its chunk (and neighbours it borders) for rebuilding. */
+  edit(ix: number, iy: number, iz: number, b: number): boolean {
+    if (!this.inBounds(ix, iy, iz)) return false;
+    const i = this.index(ix, iy, iz);
+    if (this.data[i] === b) return false;
+    this.data[i] = b;
+    const C = 16;
+    const mark = (x: number, y: number, z: number) => {
+      const k = `${x},${y},${z}`;
+      this.dirtyChunks.add(k);
+      this.touchedChunks.add(k);
+    };
+    const cx = Math.floor(ix / C), cy = Math.floor(iy / C), cz = Math.floor(iz / C);
+    mark(cx, cy, cz);
+    // Faces and ambient occlusion of the neighbouring chunk can change too.
+    if (ix % C === 0) mark(cx - 1, cy, cz);
+    if (ix % C === C - 1) mark(cx + 1, cy, cz);
+    if (iy % C === 0) mark(cx, cy - 1, cz);
+    if (iy % C === C - 1) mark(cx, cy + 1, cz);
+    if (iz % C === 0) mark(cx, cy, cz - 1);
+    if (iz % C === C - 1) mark(cx, cy, cz + 1);
+    return true;
+  }
+
   /** Solid for collision: any block, plus the walls around the grid. */
   solidCell(ix: number, iy: number, iz: number): boolean {
     if (iy < 0) return true;

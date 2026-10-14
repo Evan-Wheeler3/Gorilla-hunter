@@ -15,7 +15,17 @@ const STEP_HEIGHT = 1.0;
 
 export interface GorillaEvents {
   swipe(g: Gorilla): void;
+  /** Landed a ground pound from `height` metres. */
+  groundPound(g: Gorilla, height: number): void;
+  /** Moving fast enough to burst through foliage this step. */
+  smash(g: Gorilla): void;
 }
+
+/** Most links counted in a swing chain; each adds release speed. */
+export const MAX_CHAIN = 5;
+/** Ground pound: least height above the ground to start one, and its dive speed. */
+const POUND_MIN_HEIGHT = 3;
+const POUND_SPEED = 30;
 
 /**
  * Gorilla movement and melee: knuckle-run, dash, jump, climbing trunks and walls with mantling
@@ -28,7 +38,6 @@ export class Gorilla {
   yaw = 0;
   state: GorillaState = 'ground';
   stamina = G.maxStamina;
-  rage = false;
   held = false;
   readonly sedation = new SedationMeter(config.sedation);
   /** Locked into a finisher animation until this match time. */
@@ -37,6 +46,25 @@ export class Gorilla {
   inFinisher = false;
   /** Id of the hunter dragging this gorilla's body, or null. */
   draggedBy: number | null = null;
+  /** Vines grabbed in a row without touching the ground (0 = not chaining). */
+  chain = 0;
+  /** Diving into a ground pound. */
+  pounding = false;
+  private poundFrom = 0;
+  /** Caught in a hunter's net until this match time. */
+  netUntil = -1;
+  /** Struggle while being dragged, 0..1: slows the dragger. */
+  struggle = 0;
+  /** Kills since this gorilla last went down (three in a row brings rage). */
+  streak = 0;
+  /** Streak rage lasts until this match time. */
+  streakRageUntil = -1;
+  /** Permanent rage for the last gorilla standing. */
+  lastStand = false;
+  /** One free instant revive per round: the first slap on a downed teammate. */
+  wakeRoarReady = true;
+  /** Seen by hunters (flare or lightning) until this match time. */
+  revealedUntil = -1;
 
   // Animation hints for the view.
   lastSwipeTime = -10;
@@ -82,6 +110,9 @@ export class Gorilla {
     return { x: this.body.x, y: this.body.y + this.body.height / 2, z: this.body.z };
   }
 
+  /** Rage: permanent for the last gorilla, or for a while after a kill streak. Set from match time. */
+  rage = false;
+
   get dashing(): boolean {
     return this.dashTimer > 0;
   }
@@ -100,7 +131,8 @@ export class Gorilla {
     const c = this.center;
     const exclude = ctx.time - this.lastReleaseTime < VINE_REGRAB_DELAY ? this.lastReleased : null;
     let best: Vine | null = null;
-    let bestD = G.swingGrabRange;
+    // Easier to catch the next vine mid-flight: that is how chains are made.
+    let bestD = G.swingGrabRange * (this.body.onGround ? 1 : 1.4);
     for (const v of ctx.vines) {
       if (v === exclude) continue;
       const d = Math.hypot(v.x - c.x, v.z - c.z, c.y - Math.max(v.bottom, Math.min(v.top, c.y)));
@@ -126,13 +158,21 @@ export class Gorilla {
     this.stamina = G.maxStamina;
   }
 
+  /** In the net: frozen, but darts still land. */
+  netted(time: number): boolean {
+    return time < this.netUntil;
+  }
+
   private cost(amount: number): number {
     return this.rage ? 0 : amount;
   }
 
   update(input: InputFrame, dt: number, ctx: SimContext): void {
     if (dt <= 0) return;
-    if (this.held) input = { ...input, moveX: 0, moveY: 0, jump: false, dash: false, primary: false, primaryHeld: false };
+    if (this.held || ctx.time < this.netUntil) input = { ...input, moveX: 0, moveY: 0, jump: false, dash: false, primary: false, primaryHeld: false };
+    // Dragged: mashing SWIPE or JUMP fights the hunter; it fades if you stop.
+    if (this.draggedBy !== null && (input.primary || input.jump || input.dash)) this.struggle = Math.min(1, this.struggle + 0.16);
+    this.struggle = Math.max(0, this.struggle - (this.draggedBy !== null ? 0.5 : 4) * dt);
 
     this.dashTimer -= dt;
     this.dashCooldown -= dt;
@@ -194,12 +234,19 @@ export class Gorilla {
       hx = this.dashDir.x * G.dashSpeed;
       hz = this.dashDir.z * G.dashSpeed;
     } else if (grounded) {
-      [hx, hz] = moveToward(hx, hz, wishX * G.groundSpeed * slow, wishZ * G.groundSpeed * slow, G.groundAcceleration * dt);
+      const top = G.groundSpeed * slow * (this.rage ? 1.15 : 1);
+      [hx, hz] = moveToward(hx, hz, wishX * top, wishZ * top, G.groundAcceleration * dt);
     } else {
       [hx, hz] = airAccelerate(hx, hz, wishX, wishZ, G.groundSpeed, G.airAcceleration * dt);
     }
 
     let vy = this.vel.y;
+    if (this.pounding) {
+      // Diving: straight down hard, with a little of the run-up carried.
+      hx *= 0.9;
+      hz *= 0.9;
+      vy = -POUND_SPEED;
+    }
     if (grounded) {
       this.stamina = Math.min(G.maxStamina, this.stamina + G.groundStaminaRegenPerSecond * dt);
       vy = input.jump ? Math.sqrt(2 * GRAVITY * G.jumpHeight) : -1;
@@ -215,9 +262,16 @@ export class Gorilla {
     if (this.body.onGround) this.stride += Math.hypot(hx, hz) * dt;
 
     if (!grounded && this.body.onGround) {
-      if (this.airFromSwing) this.landingSlow = G.swingLandingSlowDuration;
+      if (this.airFromSwing && !this.pounding) this.landingSlow = G.swingLandingSlowDuration;
       this.airFromSwing = false;
+      this.chain = 0;
+      if (this.pounding) {
+        this.pounding = false;
+        this.events.groundPound(this, this.poundFrom - this.body.y);
+      }
     }
+    // Bursting through leaves: dashing, diving or flying fast off a vine.
+    if (this.dashing || this.pounding || (!this.body.onGround && Math.hypot(this.vel.x, this.vel.y, this.vel.z) > 11)) this.events.smash(this);
 
     // Holding forward into a trunk or wall starts a climb.
     if (input.moveY > 0.5 && this.stamina > 0 && ctx.time >= this.reclimbAt) {
@@ -237,6 +291,15 @@ export class Gorilla {
     if (input.primaryHeld && vine && this.stamina >= this.cost(G.swingAttachStaminaCost)) {
       this.enterSwing(vine, ctx);
       return;
+    }
+    if (input.primary && !this.body.onGround && !this.pounding) {
+      const below = ctx.world.raycast(this.body.x, this.body.y + 0.1, this.body.z, 0, -1, 0, 40);
+      if (below < 0 || below >= POUND_MIN_HEIGHT) {
+        this.pounding = true;
+        this.poundFrom = this.body.y;
+        this.dashTimer = 0;
+        return;
+      }
     }
     if (input.primary) this.trySwipe(input.yaw, ctx);
   }
@@ -358,6 +421,9 @@ export class Gorilla {
     this.swingVine = vine;
     this.swingPivot = { x: vine.x, y: vine.top, z: vine.z };
     this.swingTime = 0;
+    // Caught a vine in mid-air straight off another: the chain grows.
+    this.chain = !this.body.onGround && this.airFromSwing ? Math.min(MAX_CHAIN, this.chain + 1) : 0;
+    this.pounding = false;
     const c = this.center;
     const dist = Math.hypot(c.x - vine.x, c.y - vine.top, c.z - vine.z);
     const clearance = ctx.world.groundHeight(vine.x, vine.z) + this.body.height / 2 + 1.6; // feet skim clear of bumps
@@ -431,8 +497,9 @@ export class Gorilla {
     }
 
     const speed = Math.hypot(vx, vy, vz);
-    if (speed > G.swingMaxSpeed) {
-      const k = G.swingMaxSpeed / speed;
+    const maxSpeed = G.swingMaxSpeed + this.chain * 2;
+    if (speed > maxSpeed) {
+      const k = maxSpeed / speed;
       vx *= k;
       vy *= k;
       vz *= k;
@@ -451,9 +518,11 @@ export class Gorilla {
   /** Let go of the vine; a released swing launches the gorilla forward and up. */
   private releaseSwing(ctx: SimContext, launch: boolean): void {
     if (launch && this.swingVine) {
-      this.vel.x *= G.swingReleaseBoost;
-      this.vel.z *= G.swingReleaseBoost;
-      this.vel.y = Math.max(this.vel.y, 0) * G.swingReleaseBoost + G.swingReleaseLift;
+      // Every link in a chain throws you a little further.
+      const boost = G.swingReleaseBoost + this.chain * 0.07;
+      this.vel.x *= boost;
+      this.vel.z *= boost;
+      this.vel.y = Math.max(this.vel.y, 0) * boost + G.swingReleaseLift;
     }
     this.lastReleased = this.swingVine;
     this.lastReleaseTime = ctx.time;
@@ -467,6 +536,9 @@ export class Gorilla {
 
   private enterDown(): void {
     this.state = 'down';
+    this.pounding = false;
+    this.chain = 0;
+    this.streak = 0;
     this.swingVine = null;
     this.swingPivot = null;
     this.vel = { x: 0, y: Math.min(0, this.vel.y), z: 0 };

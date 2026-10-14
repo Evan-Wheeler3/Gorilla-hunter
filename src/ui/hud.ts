@@ -28,6 +28,10 @@ export class Hud {
   private readonly labels: HTMLElement;
   private readonly results: HTMLElement;
   private readonly hint: HTMLElement;
+  private readonly badges: HTMLElement;
+  private readonly heatGlow: HTMLElement;
+  private readonly replayTag: HTMLElement;
+  private readonly toolLabels = new Map<string, HTMLElement>();
   private labelPool: HTMLElement[] = [];
   onPlayAgain: () => void = () => {};
   onMenu: () => void = () => {};
@@ -50,7 +54,35 @@ export class Hud {
     this.arrow = el(this.root, 'boat-arrow');
     this.arrow.textContent = '➤';
     this.hint = el(this.root, 'hint');
+    this.badges = el(this.root, 'badges');
+    this.heatGlow = el(this.root, 'heat-glow');
     this.results = el(this.root, 'results');
+    this.replayTag = el(this.root, 'replay-tag');
+    this.replayTag.style.display = 'none';
+  }
+
+  /** Over the best-kill replay on the results screen. */
+  setReplay(text: string | null): void {
+    this.replayTag.textContent = text ?? '';
+    this.replayTag.style.display = text ? '' : 'none';
+  }
+
+  /** Cooldown text on a touch button (NET / FLARE), found by class. */
+  setToolLabel(cls: string, text: string, ready: boolean): void {
+    let b = this.toolLabels.get(cls);
+    if (!b) {
+      const found = this.root.parentElement?.querySelector(`.${cls}`) as HTMLElement | null;
+      if (!found) return;
+      b = found;
+      this.toolLabels.set(cls, b);
+    }
+    if (b.textContent !== text) b.textContent = text;
+    b.classList.toggle('cooling', !ready);
+  }
+
+  private setBadges(items: [string, string][]): void {
+    const html = items.map(([cls, text]) => `<span class="badge ${cls}">${text}</span>`).join('');
+    if (this.badges.innerHTML !== html) this.badges.innerHTML = html;
   }
 
   setHint(text: string): void {
@@ -67,9 +99,16 @@ export class Hud {
     const r = match.round;
     const t = r.timeRemaining;
     const clock = `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
-    this.bar.innerHTML =
-      `<span class="clock">${clock}</span>` +
-      `<span>🦍 ${r.gorillas.size}</span><span>🎯 ${r.aliveHunters.size}</span><span>❤ ${r.livesRemaining}</span>`;
+    const weather = match.weather === 'storm' ? '⛈' : match.weather === 'mist' ? '🌫' : '🌅';
+    const fire = match.wildfire.active ? '<span class="fire">🔥</span>' : '';
+    const html =
+      `<span class="clock">${clock}</span>${fire}` +
+      `<span>🦍 ${r.gorillas.size}</span><span>🎯 ${r.aliveHunters.size}</span><span>❤ ${r.livesRemaining}</span><span>${weather}</span>`;
+    if (this.bar.innerHTML !== html) this.bar.innerHTML = html;
+
+    // The fire: an orange glow that builds the longer you stand in it, and an arrow to safety.
+    const heat = me ? match.heat.get(me.id) ?? 0 : 0;
+    this.heatGlow.style.opacity = `${Math.min(1, heat / 3)}`;
 
     const showAnnounce = match.time < match.announcementUntil && r.phase !== 'ended';
     this.announce.textContent = showAnnounce ? match.announcement : '';
@@ -96,6 +135,13 @@ export class Hud {
 
     if (me.team === 'gorilla') this.updateGorilla(match, me, project);
     else this.updateHunter(match, me, project);
+
+    const outside = match.wildfire.active && Math.hypot(me.body.x - match.wildfire.center.x, me.body.z - match.wildfire.center.z) > match.fireRadius - 3;
+    const alive = me.team === 'gorilla' ? !me.sedation.isDown : !me.dead;
+    if (outside && alive) {
+      if (heat > 0) this.center.textContent = 'IN THE FIRE! Get inside the ring';
+      this.pointTo(match.wildfire.center.x, 1, match.wildfire.center.z, me, project, '🔥');
+    }
   }
 
   private updateGorilla(match: Match, g: Gorilla, _project: Project): void {
@@ -106,19 +152,43 @@ export class Hud {
     const down = g.sedation.isDown;
     this.vignette.style.opacity = down ? '1' : `${g.sedation.normalized * 0.7}`;
     this.arrow.style.display = 'none';
-    if (down) {
+    const t = match.ctx.time;
+    const badges: [string, string][] = [];
+    if (g.chain > 0) badges.push(['chain', `CHAIN ×${g.chain + 1}`]);
+    if (t < g.streakRageUntil) badges.push(['rage', `RAMPAGE ${Math.ceil(g.streakRageUntil - t)}s`]);
+    else if (g.lastStand) badges.push(['rage', 'LAST STAND']);
+    else if (g.streak > 0) badges.push(['streak', `${g.streak}/3 kills`]);
+    if (g.wakeRoarReady) badges.push(['roar', 'WAKE ROAR ready']);
+    if (g.netted(t)) badges.push(['net', 'NETTED!']);
+    if (t < g.revealedUntil) badges.push(['seen', 'SPOTTED']);
+    this.setBadges(badges);
+    if (down && g.draggedBy !== null) {
+      this.center.textContent = `BEING DRAGGED!  Mash SWIPE to struggle  ${Math.ceil(g.sedation.remainingDowntime)}s`;
+      this.prompt.textContent = 'Your gorillas can charge him to make him drop you';
+    } else if (down) {
       this.center.textContent = `KNOCKED OUT  ${Math.ceil(g.sedation.remainingDowntime)}s${g.draggedBy !== null ? ' - being dragged!' : ''}`;
       this.prompt.textContent = 'Your gorillas can slap you awake';
     } else {
       this.center.textContent = g.held ? 'Wait in the nest...' : '';
       const vine = g.vineInRange(match.ctx);
-      this.prompt.textContent = vine ? 'Hold SWIPE to grab the vine' : g.state === 'swing' ? 'Let go of SWIPE to launch' : g.state === 'climb' ? 'Climbing: SPACE/JUMP to leap off' : '';
+      const high = !g.body.onGround && g.state === 'ground' && match.ctx.world.raycast(g.body.x, g.body.y + 0.1, g.body.z, 0, -1, 0, 40) !== -1 && match.ctx.world.raycast(g.body.x, g.body.y + 0.1, g.body.z, 0, -1, 0, 3) === -1;
+      this.prompt.textContent = vine
+        ? g.body.onGround ? 'Hold SWIPE to grab the vine' : 'Hold SWIPE: catch the next vine!'
+        : g.state === 'swing' ? 'Let go of SWIPE to launch'
+        : g.state === 'climb' ? 'Climbing: SPACE/JUMP to leap off'
+        : high ? 'SWIPE in the air: GROUND POUND' : '';
     }
   }
 
   private updateHunter(match: Match, h: Hunter, project: Project): void {
     this.stamina.style.display = 'none';
     this.vignette.style.opacity = '0';
+    const t = match.ctx.time;
+    const badges: [string, string][] = [];
+    if (t < h.revealedUntil) badges.push(['seen', 'SPOTTED']);
+    this.setBadges(badges);
+    this.setToolLabel('btn-net', h.netCooldown > 0 ? `${Math.ceil(h.netCooldown)}` : 'NET', h.netCooldown <= 0);
+    this.setToolLabel('btn-flare', h.flareCooldown > 0 ? `${Math.ceil(h.flareCooldown)}` : 'FLARE', h.flareCooldown <= 0);
     if (h.dead) {
       this.crosshair.style.display = 'none';
       this.arrow.style.display = 'none';
@@ -148,6 +218,23 @@ export class Hud {
       } else {
         this.prompt.textContent = '';
       }
+    }
+  }
+
+  /** An arrow toward a world point: over it when on screen, at the screen edge when not. */
+  private pointTo(x: number, y: number, z: number, me: Gorilla | Hunter, project: Project, icon: string): void {
+    const p = project(x, y + 2, z);
+    const cx = innerWidth / 2, cy = innerHeight / 2;
+    const tx = p ? p.x : cx, ty = p ? p.y : innerHeight;
+    const angle = Math.atan2(ty - cy, tx - cx);
+    const onScreen = p && p.x > 40 && p.x < innerWidth - 40 && p.y > 40 && p.y < innerHeight - 40;
+    const d = Math.round(Math.hypot(x - me.body.x, z - me.body.z));
+    this.arrow.style.display = '';
+    this.arrow.textContent = onScreen ? `${icon} ${d}m` : '➤';
+    if (onScreen) this.arrow.style.transform = `translate(${p!.x}px, ${p!.y - 40}px) translate(-50%, -50%)`;
+    else {
+      const r = Math.min(innerWidth, innerHeight) * 0.38;
+      this.arrow.style.transform = `translate(${cx + Math.cos(angle) * r}px, ${cy + Math.sin(angle) * r}px) translate(-50%, -50%) rotate(${angle}rad)`;
     }
   }
 

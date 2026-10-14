@@ -240,6 +240,88 @@ export class Effects {
   }
 
   /** A spray of voxel cubes from a point; `dir` biases the spray. */
+  /** Leaves knocked loose: they flutter down slowly. */
+  leaves(at: { x: number; y: number; z: number }, count: number, burnt: boolean): void {
+    const colors = burnt ? [0x6b3a14, 0x3a2414, 0x8a5020] : [0x3f9a34, 0x2c7a2e, 0x63b84a, 0x2a6a24];
+    for (let i = 0; i < Math.min(60, count * 2); i++)
+      this.spawn({
+        x: at.x + (Math.random() - 0.5) * 2,
+        y: at.y + (Math.random() - 0.5) * 2,
+        z: at.z + (Math.random() - 0.5) * 2,
+        vx: (Math.random() - 0.5) * 6,
+        vy: Math.random() * 3,
+        vz: (Math.random() - 0.5) * 6,
+        size: 0.1 + Math.random() * 0.12,
+        color: colors[(Math.random() * colors.length) | 0],
+        life: 2.5 + Math.random() * 2,
+        gravity: 2.5,
+        bounce: 0,
+      });
+  }
+
+  /** An expanding ring on the ground, plus a skirt of dust and flung dirt (ground pounds, craters). */
+  shockwave(at: { x: number; y: number; z: number }, radius: number, color = 0xf2e2c0): void {
+    const mesh = new THREE.Mesh(this.ringGeo, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.8, depthWrite: false, side: THREE.DoubleSide }));
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.position.set(at.x, at.y + 0.1, at.z);
+    this.scene.add(mesh);
+    this.rings.push({ mesh, life: 0.45, max: 0.45, radius });
+    for (let i = 0; i < 40; i++) {
+      const a = (i / 40) * Math.PI * 2;
+      const sp = 6 + Math.random() * 4;
+      this.spawn({ x: at.x + Math.cos(a), y: at.y + 0.2, z: at.z + Math.sin(a), vx: Math.cos(a) * sp, vy: 1 + Math.random() * 2, vz: Math.sin(a) * sp, size: 0.18 + Math.random() * 0.15, color: 0xcfc2a5, life: 0.9, gravity: 3 });
+    }
+    for (let i = 0; i < 26; i++)
+      this.spawn({ x: at.x, y: at.y + 0.3, z: at.z, vx: (Math.random() - 0.5) * 9, vy: 5 + Math.random() * 7, vz: (Math.random() - 0.5) * 9, size: 0.14 + Math.random() * 0.12, color: Math.random() < 0.5 ? 0x7a5636 : 0x5c4027, life: 3 });
+  }
+
+  /** Flames licking up from a point (something burning). */
+  flame(at: { x: number; y: number; z: number }, spread = 0.6, amount = 2): void {
+    for (let i = 0; i < amount; i++)
+      this.spawn({
+        x: at.x + (Math.random() - 0.5) * spread,
+        y: at.y + Math.random() * 0.4,
+        z: at.z + (Math.random() - 0.5) * spread,
+        vx: (Math.random() - 0.5) * 0.6,
+        vy: 2 + Math.random() * 2.5,
+        vz: (Math.random() - 0.5) * 0.6,
+        size: 0.12 + Math.random() * 0.12,
+        color: [0xffd34d, 0xff8a1e, 0xff4a12][(Math.random() * 3) | 0],
+        life: 0.35 + Math.random() * 0.35,
+        gravity: -1,
+        bounce: 0,
+      });
+  }
+
+  /** A slow plume of smoke. */
+  smoke(at: { x: number; y: number; z: number }): void {
+    this.spawn({ x: at.x + (Math.random() - 0.5), y: at.y, z: at.z + (Math.random() - 0.5), vx: 0.3, vy: 1.5 + Math.random(), vz: 0.2, size: 0.45 + Math.random() * 0.4, color: Math.random() < 0.5 ? 0x4a4440 : 0x6a625c, life: 2.5, gravity: -0.3, bounce: 0 });
+  }
+
+  /** The once-a-round wake-up roar: a golden ring and sparks. */
+  wakeRoar(at: { x: number; y: number; z: number }): void {
+    this.shockwave({ x: at.x, y: at.y - 1, z: at.z }, 4, 0xffd34d);
+    this.burst(at, [0xffd34d, 0xffffff, 0xffb020], 40, 7, { x: 0, y: 5, z: 0 }, 0.12);
+  }
+
+  private readonly ringGeo = new THREE.RingGeometry(0.8, 1, 40);
+  private readonly rings: { mesh: THREE.Mesh; life: number; max: number; radius: number }[] = [];
+
+  private updateRings(dt: number): void {
+    for (let i = this.rings.length - 1; i >= 0; i--) {
+      const r = this.rings[i];
+      r.life -= dt;
+      const k = 1 - r.life / r.max;
+      r.mesh.scale.setScalar(0.5 + k * r.radius);
+      (r.mesh.material as THREE.MeshBasicMaterial).opacity = 0.8 * (1 - k);
+      if (r.life <= 0) {
+        r.mesh.removeFromParent();
+        (r.mesh.material as THREE.Material).dispose();
+        this.rings.splice(i, 1);
+      }
+    }
+  }
+
   /** Speed lines streaming off a dashing body. */
   streak(at: { x: number; y: number; z: number }, vx: number, vz: number): void {
     for (let i = 0; i < 3; i++)
@@ -405,6 +487,7 @@ export class Effects {
   }
 
   update(dt: number, darts: Dart[]): void {
+    this.updateRings(dt);
     this.shake = Math.max(0, this.shake - dt * 1.8);
     this.clock += dt;
     this.updateChunks(dt);

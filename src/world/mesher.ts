@@ -7,6 +7,8 @@ export interface ChunkMesh {
   positions: Float32Array;
   normals: Float32Array;
   colors: Float32Array;
+  /** 1 for foliage vertices that sway in the wind, else 0. */
+  sway: Float32Array;
   indices: Uint32Array;
 }
 
@@ -37,7 +39,7 @@ const srgbToLinear = (c: number) => (c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.
  * jitter. Returns null for empty chunks.
  */
 export function meshChunk(world: VoxelWorld, cx: number, cy: number, cz: number): ChunkMesh | null {
-  const pos: number[] = [], nor: number[] = [], col: number[] = [], idx: number[] = [];
+  const pos: number[] = [], nor: number[] = [], col: number[] = [], sw: number[] = [], idx: number[] = [];
   const s = world.size;
   const solid = (x: number, y: number, z: number) => world.get(x, y, z) !== Block.Air;
 
@@ -48,6 +50,7 @@ export function meshChunk(world: VoxelWorld, cx: number, cy: number, cz: number)
         if (b === Block.Air) continue;
         const info = blockInfo(b);
         const j = 1 + info.jitter * hash3(x, y, z);
+        const sways = b === Block.Leaves || b === Block.LeavesDark || b === Block.BurntLeaves ? 1 : 0;
 
         for (const f of FACES) {
           const nx = x + f.n[0], ny = y + f.n[1], nz = z + f.n[2];
@@ -70,6 +73,7 @@ export function meshChunk(world: VoxelWorld, cx: number, cy: number, cz: number)
             const pz = base[2] + (f.u[2] * cu + f.v[2] * cv) * 0.5;
             pos.push(world.originX + px * s, py * s, world.originZ + pz * s);
             nor.push(f.n[0], f.n[1], f.n[2]);
+            sw.push(sways);
 
             // Ambient occlusion from the three neighbours touching this corner on the open side.
             const s1 = solid(nx + f.u[0] * cu, ny + f.u[1] * cu, nz + f.u[2] * cu) ? 1 : 0;
@@ -95,6 +99,7 @@ export function meshChunk(world: VoxelWorld, cx: number, cy: number, cz: number)
     positions: new Float32Array(pos),
     normals: new Float32Array(nor),
     colors: new Float32Array(col),
+    sway: new Float32Array(sw),
     indices: new Uint32Array(idx),
   };
 }

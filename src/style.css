@@ -295,6 +295,87 @@ body,
   transition: opacity 0.2s;
 }
 
+.heat-glow {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at center, transparent 40%, rgba(255, 90, 10, 0.75));
+  opacity: 0;
+  transition: opacity 0.25s;
+}
+
+.badges {
+  position: absolute;
+  top: calc(max(10px, env(safe-area-inset-top)) + 64px);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: center;
+  max-width: 90vw;
+}
+
+.badge {
+  font-family: 'Lilita One', sans-serif;
+  font-size: 15px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+}
+
+.badge.chain {
+  background: rgba(60, 170, 70, 0.8);
+  font-size: 18px;
+}
+
+.badge.rage {
+  background: rgba(220, 40, 30, 0.85);
+  animation: pulse 0.6s infinite alternate;
+}
+
+.badge.roar {
+  background: rgba(255, 190, 40, 0.75);
+  color: #2a1a00;
+}
+
+.badge.net,
+.badge.seen {
+  background: rgba(255, 59, 59, 0.85);
+}
+
+@keyframes pulse {
+  from {
+    transform: scale(1);
+  }
+  to {
+    transform: scale(1.08);
+  }
+}
+
+.round-bar .fire {
+  animation: pulse 0.5s infinite alternate;
+}
+
+.touch-btn.cooling {
+  opacity: 0.45;
+}
+
+.replay-tag {
+  position: absolute;
+  top: calc(max(12px, env(safe-area-inset-top)) + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: 'Lilita One', sans-serif;
+  font-size: 20px;
+  color: #fff;
+  background: rgba(200, 30, 30, 0.85);
+  padding: 4px 14px;
+  border-radius: 6px;
+  letter-spacing: 1px;
+  z-index: 5;
+}
+
 .boat-arrow {
   position: absolute;
   left: 0;
@@ -339,10 +420,13 @@ body,
   display: none;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-end;
+  padding-bottom: max(40px, env(safe-area-inset-bottom));
   gap: 12px;
-  background: rgba(10, 20, 10, 0.72);
+  /* See-through at the top, so the best-kill replay plays behind the result. */
+  background: linear-gradient(to bottom, rgba(10, 20, 10, 0) 30%, rgba(10, 20, 10, 0.85) 85%);
   pointer-events: auto;
+  z-index: 6;
 }
 
 .results h1 {
@@ -442,10 +526,92 @@ body,
   height: 66px;
 }
 
+/* Hunter tools: small, above the jump button. */
+.btn-net,
+.btn-flare {
+  width: 52px;
+  height: 52px;
+  font-size: 11px !important;
+  bottom: max(118px, calc(env(safe-area-inset-bottom) + 100px));
+}
+
+.btn-net {
+  right: max(196px, calc(env(safe-area-inset-right) + 172px));
+}
+
+.btn-flare {
+  right: max(132px, calc(env(safe-area-inset-right) + 108px));
+}
+
 /* Aim sits by the left thumb, above the joystick. */
 .btn-aim {
   left: max(26px, env(safe-area-inset-left));
   bottom: max(178px, calc(env(safe-area-inset-bottom) + 160px));
   width: 74px;
   height: 74px;
+}
+
+/* Letterbox bars for cinematic moments. */
+.hud::before,
+.hud::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 0;
+  background: #000;
+  transition: height 0.35s ease;
+  z-index: 4;
+}
+
+.hud::before {
+  top: 0;
+}
+
+.hud::after {
+  bottom: 0;
+}
+
+.hud.cinematic::before,
+.hud.cinematic::after {
+  height: 9vh;
+}
+
+.looks {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+  margin: 6px 0;
+}
+
+.look {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  justify-content: center;
+}
+
+.look span {
+  font-size: 13px;
+  opacity: 0.8;
+  margin-right: 4px;
+}
+
+.chip {
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  background: rgba(0, 0, 0, 0.3);
+  color: #fff;
+  cursor: pointer;
+}
+
+.chip.on {
+  background: var(--sun);
+  color: #2a1a00;
+  border-color: var(--sun);
 }

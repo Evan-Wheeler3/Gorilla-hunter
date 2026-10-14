@@ -22,14 +22,28 @@ describe('FinisherSelector', () => {
     expect(seen.size).toBe(LAUNCH_FINISHERS.length);
   });
 
-  it('rage makes the legendary more common', () => {
+  it('rage makes rare and legendary finishers more common', () => {
     const count = (rage: boolean) => {
       const s = make(123);
       let n = 0;
-      for (let i = 0; i < 20000; i++) if (s.pick(i % 3, rage).finisher.rarity === 'legendary') n++;
+      for (let i = 0; i < 20000; i++) {
+        const r = s.pick(i % 3, rage).finisher.rarity;
+        if (r === 'rare' || r === 'legendary') n++;
+      }
       return n;
     };
-    expect(count(true)).toBeGreaterThan(count(false) * 1.5);
+    expect(count(true)).toBeGreaterThan(count(false) * 1.4);
+  });
+
+  it('a kill streak only picks rare and legendary finishers, never the same twice running', () => {
+    const s = make(5);
+    let last = '';
+    for (let i = 0; i < 200; i++) {
+      const f = s.pickTop(1).finisher;
+      expect(['rare', 'legendary']).toContain(f.rarity);
+      expect(f.id).not.toBe(last);
+      last = f.id;
+    }
   });
 
   it('is deterministic per seed and survives a one-item catalog', () => {

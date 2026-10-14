@@ -67,6 +67,15 @@ export const config = {
     interactReach: 2.8,
     dragDistance: 2.4,
     tapMaxSeconds: 0.3,
+    /** Net trap: holds a gorilla that steps in it. */
+    netCooldown: 12,
+    netMaxActive: 2,
+    netHoldSeconds: 2,
+    netRadius: 1.1,
+    /** Flare: shows every gorilla near the hunter, through walls. */
+    flareCooldown: 20,
+    flareRevealRadius: 30,
+    flareRevealSeconds: 3,
   },
 
   sedation: {

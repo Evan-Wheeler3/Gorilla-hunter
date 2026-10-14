@@ -117,6 +117,7 @@ export function generateIsland(seed = 1234): Island {
   // ---- Trees, boulders ----------------------------------------------------------------
   const vines: Vine[] = [];
   const placed: { x: number; z: number }[] = [];
+  const crowns: Crown[] = [];
   const blocked = (x: number, z: number) =>
     Math.hypot(x, z) > ISLAND_RADIUS * 0.84 ||
     Math.abs(x - riverX(z)) < 6 ||
@@ -135,7 +136,8 @@ export function generateIsland(seed = 1234): Island {
     const spacing = z > 15 ? 8.5 : 10.5;
     if (placed.some((p) => Math.hypot(p.x - x, p.z - z) < spacing)) continue;
     placed.push({ x, z });
-    buildTree(world, rng, x, z, z > 15 ? 3 : 0, vines);
+    const crown = buildTree(world, rng, x, z, z > 15 ? 3 : 0, vines);
+    if (crown) crowns.push(crown);
   }
 
   for (let i = 0; i < 16; i++) {
@@ -143,6 +145,9 @@ export function generateIsland(seed = 1234): Island {
     if (blocked(x, z) || placed.some((p) => Math.hypot(p.x - x, p.z - z) < 4)) continue;
     buildBoulder(world, rng, x, z);
   }
+
+  buildCanopyRoutes(world, rng, crowns);
+  world.snapshot();
 
   const ground = (x: number, z: number): Vec3 => ({ x, y: world.surfaceHeight(x, z) + 0.05, z });
   return {
@@ -256,10 +261,58 @@ function buildCamp(world: VoxelWorld, rng: Rng): void {
   }
 }
 
-function buildTree(world: VoxelWorld, rng: Rng, x: number, z: number, extra: number, vines: Vine[]): void {
+interface Crown {
+  x: number;
+  z: number;
+  /** Height of the crown's middle and its half-height and radius. */
+  y: number;
+  ry: number;
+  rx: number;
+}
+
+/**
+ * Thick, leafy branches joining neighbouring crowns, so gorillas can run tree to tree high above
+ * the hunters. Each crown links to at most its two nearest neighbours.
+ */
+function buildCanopyRoutes(world: VoxelWorld, rng: Rng, crowns: Crown[]): void {
+  const s = world.size;
+  const links = new Map<Crown, number>();
+  const pairs: [Crown, Crown, number][] = [];
+  for (let i = 0; i < crowns.length; i++)
+    for (let j = i + 1; j < crowns.length; j++) {
+      const a = crowns[i], b = crowns[j];
+      const d = Math.hypot(a.x - b.x, a.z - b.z);
+      const gap = d - a.rx - b.rx;
+      if (gap > 0.5 && gap < 9) pairs.push([a, b, d]);
+    }
+  pairs.sort((p, q) => p[2] - q[2]);
+  for (const [a, b, d] of pairs) {
+    if ((links.get(a) ?? 0) >= 2 || (links.get(b) ?? 0) >= 2) continue;
+    links.set(a, (links.get(a) ?? 0) + 1);
+    links.set(b, (links.get(b) ?? 0) + 1);
+    // Just under the lower crown's top, so it reads as a branch growing out of the leaves.
+    const y0 = a.y + a.ry * 0.45, y1 = b.y + b.ry * 0.45;
+    const ux = (b.x - a.x) / d, uz = (b.z - a.z) / d;
+    const px = -uz, pz = ux;
+    const leaf = rng.next() < 0.5 ? Block.Leaves : Block.LeavesDark;
+    for (let t = a.rx * 0.6; t <= d - b.rx * 0.6; t += s * 0.5) {
+      const k = t / d;
+      const x = a.x + ux * t, z = a.z + uz * t;
+      // A gentle sag in the middle.
+      const y = y0 + (y1 - y0) * k - Math.sin(k * Math.PI) * 0.6;
+      world.set(world.ix(x), world.iy(y - s), world.iz(z), Block.Wood);
+      for (let w = -0.75; w <= 0.75; w += s * 0.5) {
+        const lx = x + px * w, lz = z + pz * w;
+        world.set(world.ix(lx), world.iy(y), world.iz(lz), rng.next() < 0.2 ? Block.LeavesDark : leaf);
+      }
+    }
+  }
+}
+
+function buildTree(world: VoxelWorld, rng: Rng, x: number, z: number, extra: number, vines: Vine[]): Crown | null {
   const s = world.size;
   const ground = world.surfaceHeight(x, z);
-  if (ground < WATER + 0.6) return;
+  if (ground < WATER + 0.6) return null;
   const height = rng.range(13, 19) + extra;
   const tx = Math.floor(x / s) * s, tz = Math.floor(z / s) * s;
   const cx = tx + 0.75, cz = tz + 0.75; // trunk centre (1.5 m wide trunk)
@@ -307,6 +360,7 @@ function buildTree(world: VoxelWorld, rng: Rng, x: number, z: number, extra: num
     if (top - bottom < 4 || bottom > lowest + 1) continue;
     vines.push({ x: vx, z: vz, top, bottom });
   }
+  return { x: cx, z: cz, y: cy, ry, rx };
 }
 
 function buildBoulder(world: VoxelWorld, rng: Rng, x: number, z: number): void {

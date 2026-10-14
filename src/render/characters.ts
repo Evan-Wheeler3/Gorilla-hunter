@@ -36,8 +36,27 @@ const rand = (x: number, y: number, z: number) => {
 
 // ---------------------------------------------------------------------- gorilla
 
-// Warm, mid-tone fur so the body reads in the shade of the canopy, not as a black silhouette.
-const FUR = 0x6b5a50, FUR_HI = 0x8a7568, FUR_LO = 0x55463e, SILVER = 0xd2c9bd, SKIN = 0xa9877a, DARK = 0x2e2220;
+export type GorillaStyle = 'silverback' | 'young' | 'orangutan';
+export const GORILLA_STYLES: { id: GorillaStyle; name: string }[] = [
+  { id: 'silverback', name: 'Silverback' },
+  { id: 'young', name: 'Young' },
+  { id: 'orangutan', name: 'Orangutan' },
+];
+interface GorillaPalette {
+  fur: number;
+  hi: number;
+  lo: number;
+  silver: number;
+  skin: number;
+  dark: number;
+}
+const GORILLA_PALETTES: Record<GorillaStyle, GorillaPalette> = {
+    silverback: { fur: 0x6b5a50, hi: 0x8a7568, lo: 0x55463e, silver: 0xd2c9bd, skin: 0xa9877a, dark: 0x2e2220 },
+  young: { fur: 0x7d6656, hi: 0x9a806c, lo: 0x625044, silver: 0x7d6656, skin: 0xb8968a, dark: 0x3a2a24 },
+  orangutan: { fur: 0xc4612a, hi: 0xe07d3e, lo: 0x9e4a1e, silver: 0xd77a3c, skin: 0x8f6f60, dark: 0x3a2418 },
+};
+// The palette the builders read; set per style while its geometry is built.
+let FUR = 0, FUR_HI = 0, FUR_LO = 0, SILVER = 0, SKIN = 0, DARK = 0;
 const EYE_W = 0xf6f1e6, EYE = 0x2a1a10, MOUTH = 0x4a2420;
 const furColor = (x: number, y: number, z: number) => {
   const r = rand(x, y, z);
@@ -55,11 +74,13 @@ interface GorillaGeometry {
   shin: THREE.BufferGeometry[];
 }
 
-let gorillaGeo: GorillaGeometry | null = null;
+const gorillaGeos = new Map<GorillaStyle, GorillaGeometry>();
 
-/** Built once and shared by every gorilla. */
-function gorillaGeometry(): GorillaGeometry {
-  if (gorillaGeo) return gorillaGeo;
+/** Built once per style and shared by every gorilla of that style. */
+function gorillaGeometry(style: GorillaStyle): GorillaGeometry {
+  const cached = gorillaGeos.get(style);
+  if (cached) return cached;
+  ({ fur: FUR, hi: FUR_HI, lo: FUR_LO, silver: SILVER, skin: SKIN, dark: DARK } = GORILLA_PALETTES[style]);
   const vs = 0.1;
   const geo: GorillaGeometry = {
     torso: buildVoxelPart(15, 11, 11, vs, (x, y, z) => {
@@ -117,7 +138,7 @@ function gorillaGeometry(): GorillaGeometry {
       return y <= 1 ? SKIN : furColor(x, y, z);
     }, [3, 5, 3]));
   }
-  gorillaGeo = geo;
+  gorillaGeos.set(style, geo);
   return geo;
 }
 
@@ -162,9 +183,14 @@ export class GorillaRig {
   private landing = 0;
   private fallSpeed = 0;
 
-  constructor() {
-    const geo = gorillaGeometry();
+  private readonly geo: GorillaGeometry;
+
+  constructor(readonly style: GorillaStyle = 'silverback') {
+    const geo = gorillaGeometry(style);
+    this.geo = geo;
     this.root.add(this.body);
+    // Young gorillas are smaller; orangutans have long, long arms.
+    if (style === 'young') this.body.scale.setScalar(0.86);
     this.hips = pivot(this.body, 0, 1.05, 0);
     this.torso = pivot(this.hips, 0, 0, 0, part(geo.torso, this.material));
     this.headMesh = part(geo.head, this.material);
@@ -172,6 +198,10 @@ export class GorillaRig {
     [-1, 1].forEach((side, i) => {
       const upper = pivot(this.torso, side * 0.88, 0.85, 0.2, part(geo.upper[i], this.material));
       const fore = pivot(upper, 0, -0.88, 0, part(geo.fore[i], this.material));
+      if (style === 'orangutan') {
+        upper.scale.set(0.9, 1.2, 0.9);
+        fore.scale.set(0.95, 1.15, 0.95);
+      }
       this.arms.push({ upper, fore });
       const thigh = pivot(this.hips, side * 0.42, 0, -0.1, part(geo.thigh[i], this.material));
       const shin = pivot(thigh, 0, -0.58, 0, part(geo.shin[i], this.material));
@@ -317,6 +347,29 @@ export class GorillaRig {
       }
     }
 
+    // Ground pound dive: fists locked together overhead, legs tucked.
+    if (g.pounding) {
+      pose.torsoPitch = 1.15;
+      pose.arm[0] = { x: -2.9, z: 0.12, fore: -0.25 };
+      pose.arm[1] = { x: -2.9, z: -0.12, fore: -0.25 };
+      pose.leg[0] = { x: -1.1, shin: 1.5 };
+      pose.leg[1] = { x: -1.1, shin: 1.5 };
+      pose.roar = true;
+      pose.rate = 30;
+    }
+    // Netted or being dragged and fighting it: thrashing.
+    const thrash = g.netUntil > time ? 1 : g.draggedBy !== null ? g.struggle : 0;
+    if (thrash > 0.05) {
+      for (let i = 0; i < 2; i++) {
+        pose.arm[i].x += Math.sin(time * 22 + i * 2.1) * 0.9 * thrash;
+        pose.arm[i].z += Math.sin(time * 17 + i) * 0.5 * thrash;
+        pose.leg[i].x += Math.sin(time * 19 + i * Math.PI) * 0.6 * thrash;
+      }
+      pose.headZ += Math.sin(time * 13) * 0.4 * thrash;
+      pose.roar = g.netUntil > time;
+      pose.rate = 26;
+    }
+
     // Swipe: wind up, slash across, recover.
     const sinceSwipe = time - g.lastSwipeTime;
     if (sinceSwipe < 0.45 && !lying && !g.inFinisher) {
@@ -367,8 +420,7 @@ export class GorillaRig {
 
   private applyPose(pose: GorillaPose, yaw: number, dt: number): void {
     const k = pose.rate;
-    const geo = gorillaGeometry();
-    this.headMesh.geometry = pose.roar ? geo.roarHead : geo.head;
+    this.headMesh.geometry = pose.roar ? this.geo.roarHead : this.geo.head;
     this.yawOffset = pose.rate > 20 ? pose.yawOffset : damp(this.yawOffset, pose.yawOffset, 10, dt);
     this.root.rotation.y = yaw + this.yawOffset;
     this.body.rotation.x = damp(this.body.rotation.x, pose.bodyTilt, k, dt);
@@ -391,8 +443,44 @@ export class GorillaRig {
 
 // ---------------------------------------------------------------------- hunter
 
-export const KHAKI = 0xb5a272, KHAKI_DK = 0x8f7f55, VEST = 0xff6a13, VEST_DK = 0xd9520a, SKIN_H = 0xf0c39a;
-const BOOT = 0x5a3b22, BELT = 0x4a3420, HELMET = 0xe2d6b0, BAND = 0x8a6a3a, MOUSTACHE = 0x6b3f1f, GUN = 0x2c2c30, STOCK = 0x7a5230;
+export type HunterOutfit = 'safari' | 'camo' | 'poacher' | 'ranger';
+export const HUNTER_OUTFITS: { id: HunterOutfit; name: string }[] = [
+  { id: 'safari', name: 'Safari' },
+  { id: 'camo', name: 'Camo' },
+  { id: 'poacher', name: 'Poacher' },
+  { id: 'ranger', name: 'Ranger' },
+];
+interface HunterPalette {
+  shirt: number;
+  trousers: number;
+  vest: number;
+  vestDark: number;
+  hat: number;
+  band: number;
+  moustache: number;
+  /** Extra shirt colours for patterned outfits. */
+  pattern?: number[];
+}
+const HUNTER_PALETTES: Record<HunterOutfit, HunterPalette> = {
+  safari: { shirt: 0xb5a272, trousers: 0x8f7f55, vest: 0xff6a13, vestDark: 0xd9520a, hat: 0xe2d6b0, band: 0x8a6a3a, moustache: 0x6b3f1f },
+  camo: { shirt: 0x5c6b3c, trousers: 0x4a5532, vest: 0x6b5a36, vestDark: 0x3e4a2a, hat: 0x55663a, band: 0x2a3420, moustache: 0x3a2412, pattern: [0x3e4a2a, 0x7a6a44, 0x2e3620] },
+  poacher: { shirt: 0xa8322a, trousers: 0x2e4a7a, vest: 0x3a3634, vestDark: 0x22201e, hat: 0x3a2a1a, band: 0xa8322a, moustache: 0x2a1a10, pattern: [0x6a1a16, 0x2a1210] },
+  ranger: { shirt: 0x58653e, trousers: 0x3a3a30, vest: 0xff8a13, vestDark: 0xe0700a, hat: 0x7a6a44, band: 0xd4b24a, moustache: 0x8a5a2a },
+};
+export const SKIN_H = 0xf0c39a;
+export const KHAKI = HUNTER_PALETTES.safari.shirt, KHAKI_DK = HUNTER_PALETTES.safari.trousers, VEST = HUNTER_PALETTES.safari.vest;
+// The palette the builders read; set per outfit while its geometry is built.
+let SHIRT = 0, TROUSERS = 0, VEST_C = 0, VEST_DK = 0, HELMET = 0, BAND = 0, MOUSTACHE = 0;
+let PATTERN: number[] | undefined;
+const BOOT = 0x5a3b22, BELT = 0x4a3420, GUN = 0x2c2c30, STOCK = 0x7a5230;
+const HELMET_SAFARI = HUNTER_PALETTES.safari.hat, MOUSTACHE_SAFARI = HUNTER_PALETTES.safari.moustache;
+/** Shirt voxel, with camo blotches or plaid stripes for those outfits. */
+const shirt = (x: number, y: number, z: number) => {
+  if (!PATTERN) return SHIRT;
+  if (PATTERN.length === 2) return (x + 0) % 3 === 0 || y % 3 === 0 ? PATTERN[(x + y) % 2] : SHIRT; // plaid
+  const r = rand(Math.floor(x / 2), Math.floor(y / 2), z);
+  return r < 0.25 ? PATTERN[0] : r < 0.45 ? PATTERN[1] : r < 0.55 ? PATTERN[2] : SHIRT;
+};
 
 interface HunterGeometry {
   torso: THREE.BufferGeometry;
@@ -407,16 +495,19 @@ interface HunterGeometry {
   rifle: THREE.BufferGeometry;
 }
 
-let hunterGeo: HunterGeometry | null = null;
+const hunterGeos = new Map<HunterOutfit, HunterGeometry>();
 const HV = 0.075; // hunter voxel size
 
-function hunterGeometry(): HunterGeometry {
-  if (hunterGeo) return hunterGeo;
-  hunterGeo = {
+function hunterGeometry(outfit: HunterOutfit): HunterGeometry {
+  const cached = hunterGeos.get(outfit);
+  if (cached) return cached;
+  const pal = HUNTER_PALETTES[outfit];
+  [SHIRT, TROUSERS, VEST_C, VEST_DK, HELMET, BAND, MOUSTACHE, PATTERN] = [pal.shirt, pal.trousers, pal.vest, pal.vestDark, pal.hat, pal.band, pal.moustache, pal.pattern];
+  const hunterGeo: HunterGeometry = {
     torso: buildVoxelPart(7, 8, 4, HV, (x, y, z) => {
       if (y === 0) return x === 3 && z === 3 ? 0xd4b24a : BELT; // belt and buckle
-      if (y >= 2 && y <= 6 && (z === 0 || z === 3 || x === 0 || x === 6)) return (x + y) % 3 === 0 ? VEST_DK : VEST;
-      return KHAKI;
+      if (y >= 2 && y <= 6 && (z === 0 || z === 3 || x === 0 || x === 6)) return (x + y) % 3 === 0 ? VEST_DK : VEST_C;
+      return shirt(x, y, z);
     }, [3.5, 0, 2]),
     head: buildVoxelPart(5, 5, 5, HV, (x, y, z) => {
       if (z === 4 && y === 2 && (x === 1 || x === 3)) return 0x1a1a1a; // eyes
@@ -438,10 +529,10 @@ function hunterGeometry(): HunterGeometry {
       if (y === 3) return x >= 2 && x <= 4 && z >= 2 && z <= 4 ? HELMET : null;
       return HELMET;
     }, [3.5, 0, 3.5]),
-    upper: buildVoxelPart(2, 5, 2, HV, () => KHAKI, [1, 5, 1]),
-    fore: buildVoxelPart(2, 5, 2, HV, (_x, y) => (y <= 1 ? SKIN_H : KHAKI_DK), [1, 5, 1]),
-    thigh: buildVoxelPart(3, 5, 3, HV, () => KHAKI_DK, [1.5, 5, 1.5]),
-    shin: buildVoxelPart(3, 7, 4, HV, (_x, y, z) => (y <= 1 ? BOOT : z === 3 ? null : KHAKI_DK), [1.5, 7, 1.5]),
+    upper: buildVoxelPart(2, 5, 2, HV, (x, y, z) => shirt(x, y + 3, z), [1, 5, 1]),
+    fore: buildVoxelPart(2, 5, 2, HV, (_x, y) => (y <= 1 ? SKIN_H : TROUSERS === HUNTER_PALETTES.poacher.trousers ? SHIRT : TROUSERS), [1, 5, 1]),
+    thigh: buildVoxelPart(3, 5, 3, HV, () => TROUSERS, [1.5, 5, 1.5]),
+    shin: buildVoxelPart(3, 7, 4, HV, (_x, y, z) => (y <= 1 ? BOOT : z === 3 ? null : TROUSERS), [1.5, 7, 1.5]),
     rifle: buildVoxelPart(1, 2, 13, HV, (_x, y, z) => {
       if (z <= 3) return STOCK;
       if (y === 1 && z >= 5 && z <= 8) return 0x111114; // scope
@@ -449,6 +540,7 @@ function hunterGeometry(): HunterGeometry {
       return z === 12 ? 0xff4fa0 : GUN; // pink dart tip
     }, [0.5, 0.5, 4]),
   };
+  hunterGeos.set(outfit, hunterGeo);
   return hunterGeo;
 }
 
@@ -468,8 +560,11 @@ export class HunterRig {
   private recoil = 0;
   private spin = 0;
 
-  constructor() {
-    const geo = hunterGeometry();
+  private readonly geo: HunterGeometry;
+
+  constructor(readonly outfit: HunterOutfit = 'safari') {
+    const geo = hunterGeometry(outfit);
+    this.geo = geo;
     this.root.add(this.body);
     this.root.scale.setScalar(config.hunter.scale);
     this.hips = pivot(this.body, 0, 0.9, 0);
@@ -580,6 +675,12 @@ export class HunterRig {
     this.rifle.rotation.y = damp(this.rifle.rotation.y, rifle.ry, k, dt);
   }
 
+  /** Burnt black (killed by the fire). */
+  setCharred(): void {
+    this.material.color.setRGB(0.12, 0.1, 0.09);
+    this.material.emissive.setRGB(0.25, 0.06, 0);
+  }
+
   /** Semi-transparent, so your own hunter does not block the shot while aiming. */
   setGhost(on: boolean): void {
     const target = on ? 0.3 : 1;
@@ -591,8 +692,7 @@ export class HunterRig {
   }
 
   setScream(on: boolean): void {
-    const geo = hunterGeometry();
-    this.headMesh.geometry = on ? geo.screamHead : geo.head;
+    this.headMesh.geometry = on ? this.geo.screamHead : this.geo.head;
   }
 
   /** Panicked flailing for a victim held by a gorilla. */
@@ -611,5 +711,5 @@ export class HunterRig {
 
 /** Colours a killed hunter bursts into (design doc: blocky pink-red and tan debris, no realistic gore). */
 export const GORE_COLORS = [0xd2475a, 0xe0607a, 0xb83246, 0xf28a9a];
-export const HUNTER_DEBRIS_COLORS = [KHAKI, KHAKI_DK, VEST, SKIN_H, HELMET, ...GORE_COLORS];
-export const HEAD_COLORS = [SKIN_H, SKIN_H, MOUSTACHE, ...GORE_COLORS];
+export const HUNTER_DEBRIS_COLORS = [KHAKI, KHAKI_DK, VEST, SKIN_H, HELMET_SAFARI, ...GORE_COLORS];
+export const HEAD_COLORS = [SKIN_H, SKIN_H, MOUSTACHE_SAFARI, ...GORE_COLORS];

@@ -1,6 +1,8 @@
 import './style.css';
 import { Game } from './app/game';
+import { GORILLA_STYLES, HUNTER_OUTFITS, type GorillaStyle, type HunterOutfit } from './render/characters';
 import type { Team } from './game/types';
+import type { Weather } from './game/match';
 import { generateIsland, type Island } from './world/island';
 
 const app = document.getElementById('app')!;
@@ -24,10 +26,12 @@ const storage = {
   },
 };
 let quality: 'high' | 'low' = (storage.get('pr-quality') as 'high' | 'low' | null) ?? (isTouch ? 'low' : 'high');
+let gorillaStyle: GorillaStyle = GORILLA_STYLES.find((g) => g.id === storage.get('pr-gorilla'))?.id ?? 'silverback';
+let hunterOutfit: HunterOutfit = HUNTER_OUTFITS.find((h) => h.id === storage.get('pr-hunter'))?.id ?? 'safari';
 
 const nextFrame = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
 
-async function startPractice(team: Team): Promise<void> {
+async function startPractice(team: Team, weather?: Weather): Promise<void> {
   app.innerHTML = '<div class="loading"><div class="logo">PRIMAL RAID</div><p>Growing the jungle…</p></div>';
   await nextFrame();
   island ??= generateIsland(1234);
@@ -46,7 +50,8 @@ async function startPractice(team: Team): Promise<void> {
           { id: 3, name: 'Bonzo', team: 'gorilla' as const },
           { id: 4, name: 'Mabel', team: 'gorilla' as const },
         ];
-  game = new Game(app, { island, match: { practice: true, players }, localId: 1, quality });
+  const styles = new Map([[1, { gorilla: gorillaStyle, hunter: hunterOutfit }]]);
+  game = new Game(app, { island, match: { practice: true, players, weather }, localId: 1, quality, styles });
   game.onExit = () => {
     game?.dispose();
     game = null;
@@ -66,14 +71,34 @@ function showMenu(): void {
         <button class="btn secondary" disabled>Host a game · coming next</button>
         <button class="btn secondary" disabled>Join with code · coming next</button>
       </div>
+      <div class="looks">
+        <div class="look"><span>Your gorilla</span>${GORILLA_STYLES.map((g) => `<button class="chip${g.id === gorillaStyle ? ' on' : ''}" data-gorilla="${g.id}">${g.name}</button>`).join('')}</div>
+        <div class="look"><span>Your hunter</span>${HUNTER_OUTFITS.map((h) => `<button class="chip${h.id === hunterOutfit ? ' on' : ''}" data-hunter="${h.id}">${h.name}</button>`).join('')}</div>
+      </div>
       <button class="quality">Graphics: <b>${quality === 'high' ? 'High' : 'Fast'}</b></button>
       <div class="howto">${
         isTouch
-          ? 'Left thumb: move (push all the way to run) · Right thumb: look · Buttons: act'
-          : 'WASD move · Mouse look · Space jump · Shift sprint/dash · Click fire/swipe (hold near vines to swing) · Right click aim · E grab'
+          ? 'Left thumb: move (past half-way runs) · Right thumb: look · Buttons: act · SWIPE in the air from high up: ground pound'
+          : 'WASD move · Mouse look · Space jump · Shift sprint/dash · Click fire/swipe (hold near vines to swing, click in the air to ground pound) · Right click aim · E grab · Q net · R flare'
       }</div>
     </div>`;
   app.querySelectorAll<HTMLButtonElement>('[data-play]').forEach((b) => (b.onclick = () => startPractice(b.dataset.play as Team)));
+  app.querySelectorAll<HTMLButtonElement>('[data-gorilla]').forEach(
+    (b) =>
+      (b.onclick = () => {
+        gorillaStyle = b.dataset.gorilla as GorillaStyle;
+        storage.set('pr-gorilla', gorillaStyle);
+        showMenu();
+      }),
+  );
+  app.querySelectorAll<HTMLButtonElement>('[data-hunter]').forEach(
+    (b) =>
+      (b.onclick = () => {
+        hunterOutfit = b.dataset.hunter as HunterOutfit;
+        storage.set('pr-hunter', hunterOutfit);
+        showMenu();
+      }),
+  );
   app.querySelector<HTMLButtonElement>('.quality')!.onclick = () => {
     quality = quality === 'high' ? 'low' : 'high';
     storage.set('pr-quality', quality);

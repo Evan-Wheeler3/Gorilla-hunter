@@ -11,7 +11,7 @@ beforeAll(() => {
 
 /** Runs a match where bots play every seat and tallies what happened. */
 function botMatch(players: { id: number; name: string; team: 'hunter' | 'gorilla' }[], seconds: number, humans = new Set<number>()) {
-  const m = new Match(island, { practice: true, players });
+  const m = new Match(island, { practice: true, players, seed: 4, weather: 'sunset' });
   const bots = new Bots();
   const tally = { kills: 0, dashKills: 0, shots: 0, dartHits: 0, knockouts: 0, converts: 0, slaps: 0 };
   for (let i = 0; i < seconds / DT; i++) {

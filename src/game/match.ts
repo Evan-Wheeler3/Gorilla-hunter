@@ -1,7 +1,10 @@
 import { config } from '../core/config';
 import { FinisherSelector, LAUNCH_FINISHERS, type FinisherPick } from '../core/finishers';
 import { InfectionRound, type RoundEndReason, type RoundResult } from '../core/round';
+import { Rng } from '../core/rng';
+import { Block } from '../world/blocks';
 import type { Island, Vec3 } from '../world/island';
+import { Wildfire } from './wildfire';
 import { Gorilla } from './gorilla';
 import { Hunter } from './hunter';
 import { emptyInput, forwardOf, type InputFrame, type SimContext, type Team } from './types';
@@ -12,15 +15,66 @@ export interface PlayerSlot {
   team: Team;
 }
 
+export type Weather = 'sunset' | 'mist' | 'storm';
+export const WEATHERS: Weather[] = ['sunset', 'mist', 'storm'];
+
 export interface MatchOptions {
   /** Practice: everyone spawns close together and the round skips straight to the hunt. */
   practice: boolean;
   players: PlayerSlot[];
+  /** Seeds the round (weather, fire, finishers). Random if left out. */
+  seed?: number;
+  weather?: Weather;
+}
+
+/** A net trap on the ground. */
+export interface Net {
+  id: number;
+  owner: number;
+  x: number;
+  y: number;
+  z: number;
+  /** Gorilla caught in it and until when, or null while it waits. */
+  caught: number | null;
+  until: number;
+}
+
+/** A flare: rises, then hangs and burns. */
+export interface Flare {
+  x: number;
+  y: number;
+  z: number;
+  vy: number;
+  born: number;
 }
 
 /** Things that happened this step, for effects, sounds and the HUD. */
 export type MatchEffect =
-  | { type: 'kill'; victim: number; killer: number; at: Vec3; killerAt: Vec3; yaw: number; pick: FinisherPick; finisher: boolean; dash?: { x: number; z: number } }
+  | {
+      type: 'kill';
+      victim: number;
+      killer: number;
+      at: Vec3;
+      killerAt: Vec3;
+      yaw: number;
+      pick: FinisherPick;
+      finisher: boolean;
+      dash?: { x: number; z: number };
+      /** Crushed by a ground pound, or caught in the fire. */
+      pound?: boolean;
+      burn?: boolean;
+    }
+  | { type: 'pound'; gorilla: number; at: Vec3; height: number }
+  | { type: 'leaves'; at: Vec3; count: number; burnt: boolean }
+  | { type: 'crater'; at: Vec3 }
+  | { type: 'netPlaced'; net: number; at: Vec3 }
+  | { type: 'netSprung'; gorilla: number; at: Vec3 }
+  | { type: 'flare'; hunter: number; at: Vec3 }
+  | { type: 'lightning'; at: Vec3 }
+  | { type: 'wakeRoar'; gorilla: number; at: Vec3 }
+  | { type: 'chargeDrop'; hunter: number; at: Vec3 }
+  | { type: 'streak'; gorilla: number }
+  | { type: 'burning'; id: number }
   | { type: 'dartHit'; target: number | null; at: Vec3 }
   | { type: 'knockout'; gorilla: number }
   | { type: 'slap'; gorilla: number; at: Vec3 }
@@ -63,13 +117,31 @@ export class Match {
   announcementUntil = 0;
 
   private readonly finishers: FinisherSelector;
+  private readonly rng: Rng;
+  readonly seed: number;
+  readonly weather: Weather;
+  readonly wildfire: Wildfire;
+  readonly nets: Net[] = [];
+  readonly flares: Flare[] = [];
+  private nextNetId = 1;
+  private nextLightning = Infinity;
+  /** Seconds each character has spent in the fire (resets slowly once safe). */
+  readonly heat = new Map<number, number>();
 
   constructor(
     readonly island: Island,
     readonly options: MatchOptions,
   ) {
+    // Every round starts on the island as generated: no craters, no ash.
+    island.world.restore();
     this.ctx = { world: island.world, vines: island.vines, time: 0 };
-    this.finishers = new FinisherSelector(LAUNCH_FINISHERS, config.finishers, (Math.random() * 1e9) | 0);
+    this.seed = options.seed ?? ((Math.random() * 1e9) | 0);
+    this.rng = new Rng(this.seed);
+    this.finishers = new FinisherSelector(LAUNCH_FINISHERS, config.finishers, this.rng.seed());
+    this.weather = options.weather ?? WEATHERS[this.rng.int(WEATHERS.length)];
+    if (this.weather === 'storm') this.nextLightning = 8 + this.rng.next() * 10;
+    const fireAt = { x: this.rng.range(-12, 12), z: this.rng.range(-12, 12) };
+    this.wildfire = new Wildfire(island.world, fireAt, config.match.roundSeconds - config.match.fireStartSeconds);
 
     let gi = 0, hi = 0;
     for (const p of options.players) {
@@ -81,19 +153,22 @@ export class Match {
     this.round = new InfectionRound(m, this.hunters.keys(), this.gorillas.keys(), {
       phaseChanged: (phase) => {
         if (phase === 'hunt') this.announce('Gorillas released!');
-        if (phase === 'wildfire') this.announce('Halfway! The jungle gets hotter...');
+        if (phase === 'wildfire') {
+          this.wildfire.start(this.round.roundTime);
+          this.announce('WILDFIRE! Get inside the ring before it reaches you');
+        }
       },
       hunterRespawned: (id) => {
         const h = this.hunters.get(id);
         if (!h) return;
         h.revive();
-        h.setPosition(this.hunterSpawn(id));
+        h.setPosition(this.safeSpawn(this.hunterSpawn(id)));
       },
       gorillaConverted: (id) => this.convert(id),
       lastGorillaStanding: (id) => {
         const g = this.gorillas.get(id);
         if (!g) return;
-        g.rage = true;
+        g.lastStand = true;
         this.announce(`${g.name} is the last gorilla: RAGE MODE`);
       },
       ended: (result, reason) => {
@@ -113,6 +188,11 @@ export class Match {
     return this.ctx.time;
   }
 
+  /** Radius of the safe circle inside the wildfire (Infinity before it starts). */
+  get fireRadius(): number {
+    return this.wildfire.radius(this.round.roundTime);
+  }
+
   character(id: number): Gorilla | Hunter | undefined {
     return this.gorillas.get(id) ?? this.hunters.get(id);
   }
@@ -129,8 +209,10 @@ export class Match {
     const held = this.round.gorillasHeld;
     const huntersHeld = this.round.phase === 'briefing';
 
+    const t = this.ctx.time;
     for (const g of this.gorillas.values()) {
       g.held = held;
+      g.rage = g.lastStand || t < g.streakRageUntil;
       g.inFinisher = this.ctx.time < g.finisherUntil;
       g.update(inputs.get(g.id) ?? emptyInput(g.yaw), dt, this.ctx);
       const wasDown = g.sedation.isDown;
@@ -139,6 +221,8 @@ export class Match {
     }
     for (const h of this.hunters.values()) {
       h.held = huntersHeld;
+      const dragged = h.dragging !== null ? this.gorillas.get(h.dragging) : undefined;
+      h.dragResist = dragged ? dragged.struggle : 0;
       h.update(inputs.get(h.id) ?? emptyInput(h.yaw), dt, this.ctx);
     }
     for (const g of this.gorillas.values()) if (g.dashing) this.dashHits(g);
@@ -156,12 +240,220 @@ export class Match {
     }
 
     this.stepDarts(dt);
+    this.stepNets();
+    this.stepFlares(dt);
+    this.stepFire(dt);
+    this.stepWeather();
+  }
+
+  // ------------------------------------------------------------------ Hazards and weather
+
+  private stepFire(dt: number): void {
+    const fire = this.wildfire;
+    if (!fire.active) return;
+    const t = this.ctx.time;
+    const ft = this.round.roundTime;
+    fire.burn(ft);
+    const burnFor = 4;
+    for (const c of [...this.gorillas.values(), ...this.hunters.values()]) {
+      if (c.team === 'hunter' && c.dead) continue;
+      const inFire = fire.outside(c.body, ft);
+      const before = this.heat.get(c.id) ?? 0;
+      const heat = inFire ? before + dt : Math.max(0, before - dt * 0.5);
+      this.heat.set(c.id, heat);
+      if (inFire && before === 0) this.effects.push({ type: 'burning', id: c.id });
+      if (heat < burnFor) continue;
+      this.heat.set(c.id, 0);
+      if (c.team === 'hunter') {
+        c.kill(t);
+        this.effects.push({
+          type: 'kill',
+          victim: c.id,
+          killer: -1,
+          at: { x: c.body.x, y: c.body.y, z: c.body.z },
+          killerAt: { x: c.body.x, y: c.body.y, z: c.body.z },
+          yaw: c.yaw,
+          pick: { finisher: LAUNCH_FINISHERS[0], seed: c.id },
+          finisher: false,
+          burn: true,
+        });
+        this.announce(`${c.name} burned in the wildfire`);
+        this.round.reportHunterKilled(c.id);
+      } else if (!c.sedation.isDown) {
+        if (c.sedation.add(S.dartSedation)) this.effects.push({ type: 'knockout', gorilla: c.id });
+        this.announce(`${c.name} collapsed in the smoke`);
+      }
+    }
+  }
+
+  private stepWeather(): void {
+    const t = this.ctx.time;
+    if (t < this.nextLightning) return;
+    this.nextLightning = t + 12 + this.rng.next() * 14;
+    // A flash lights up everyone, wherever they hide.
+    for (const g of this.gorillas.values()) g.revealedUntil = t + 1.5;
+    for (const h of this.hunters.values()) h.revealedUntil = t + 1.5;
+    const a = this.rng.next() * Math.PI * 2;
+    this.effects.push({ type: 'lightning', at: { x: Math.cos(a) * 40, y: 30, z: Math.sin(a) * 40 } });
+  }
+
+  private placeNet(h: Hunter): boolean {
+    const mine = this.nets.filter((n) => n.owner === h.id && n.caught === null);
+    if (mine.length >= H.netMaxActive) this.nets.splice(this.nets.indexOf(mine[0]), 1); // the oldest one is picked up
+    const f = forwardOf(h.yaw);
+    const net: Net = { id: this.nextNetId++, owner: h.id, x: h.body.x + f.x * 1.2, y: h.body.y, z: h.body.z + f.z * 1.2, caught: null, until: 0 };
+    this.nets.push(net);
+    this.effects.push({ type: 'netPlaced', net: net.id, at: { x: net.x, y: net.y, z: net.z } });
+    return true;
+  }
+
+  private stepNets(): void {
+    const t = this.ctx.time;
+    for (let i = this.nets.length - 1; i >= 0; i--) {
+      const n = this.nets[i];
+      if (n.caught !== null) {
+        const g = this.gorillas.get(n.caught);
+        if (t >= n.until || !g) this.nets.splice(i, 1);
+        else if (g) {
+          // Held in place in the net.
+          g.body.x += (n.x - g.body.x) * 0.3;
+          g.body.z += (n.z - g.body.z) * 0.3;
+        }
+        continue;
+      }
+      for (const g of this.gorillas.values()) {
+        if (g.sedation.isDown || !g.body.onGround || g.state !== 'ground') continue;
+        if (Math.hypot(g.body.x - n.x, g.body.z - n.z) > H.netRadius || Math.abs(g.body.y - n.y) > 1.2) continue;
+        n.caught = g.id;
+        n.until = t + H.netHoldSeconds;
+        g.netUntil = n.until;
+        g.vel = { x: 0, y: 0, z: 0 };
+        this.effects.push({ type: 'netSprung', gorilla: g.id, at: { x: g.body.x, y: g.body.y, z: g.body.z } });
+        break;
+      }
+    }
+  }
+
+  private fireFlare(h: Hunter): void {
+    const t = this.ctx.time;
+    this.flares.push({ x: h.body.x, y: h.body.y + 2, z: h.body.z, vy: 16, born: t });
+    for (const g of this.gorillas.values())
+      if (Math.hypot(g.body.x - h.body.x, g.body.z - h.body.z) <= H.flareRevealRadius) g.revealedUntil = t + H.flareRevealSeconds;
+    this.effects.push({ type: 'flare', hunter: h.id, at: { x: h.body.x, y: h.body.y + 2, z: h.body.z } });
+  }
+
+  private stepFlares(dt: number): void {
+    const t = this.ctx.time;
+    for (let i = this.flares.length - 1; i >= 0; i--) {
+      const f = this.flares[i];
+      // Rises, slows, then drifts down under its little parachute.
+      f.vy = Math.max(-1.2, f.vy - 14 * dt);
+      f.y += f.vy * dt;
+      if (t - f.born > 8) this.flares.splice(i, 1);
+    }
+  }
+
+  // ------------------------------------------------------------------ Destruction
+
+  /** Leaves a gorilla bursts through are gone (wood stays). */
+  private smash(g: Gorilla): void {
+    const w = this.ctx.world, b = g.body, s = w.size;
+    let count = 0, burnt = false;
+    const pad = 0.35;
+    for (let y = b.y; y < b.y + b.height + pad; y += s)
+      for (let z = b.z - b.halfWidth - pad; z <= b.z + b.halfWidth + pad; z += s)
+        for (let x = b.x - b.halfWidth - pad; x <= b.x + b.halfWidth + pad; x += s) {
+          const ix = w.ix(x), iy = w.iy(y), iz = w.iz(z);
+          const block = w.get(ix, iy, iz);
+          if (block !== Block.Leaves && block !== Block.LeavesDark && block !== Block.BurntLeaves) continue;
+          if (block === Block.BurntLeaves) burnt = true;
+          if (w.edit(ix, iy, iz, Block.Air)) count++;
+        }
+    if (count > 0) this.effects.push({ type: 'leaves', at: { x: b.x, y: b.y + b.height / 2, z: b.z }, count, burnt });
+  }
+
+  /** Blasts a shallow crater into the ground: a dip of churned mud ringed by bare dirt. */
+  crater(at: { x: number; y: number; z: number }, radius: number): void {
+    const w = this.ctx.world, s = w.size;
+    for (let z = at.z - radius; z <= at.z + radius; z += s)
+      for (let x = at.x - radius; x <= at.x + radius; x += s) {
+        const d = Math.hypot(x - at.x, z - at.z);
+        if (d > radius) continue;
+        const ix = w.ix(x), iz = w.iz(z);
+        // The ground surface near the impact height.
+        let iy = w.iy(at.y + 0.6);
+        while (iy > 0 && w.get(ix, iy, iz) === Block.Air) iy--;
+        if (iy <= w.iy(config.world.waterLevel) + 1) continue; // no holes to the sea
+        const top = w.get(ix, iy, iz);
+        if (top === Block.Wood || top === Block.TempleStone || top === Block.MossStone || top === Block.Plank || top === Block.Hull) continue;
+        if (d < radius * 0.55) {
+          w.edit(ix, iy, iz, Block.Air);
+          w.edit(ix, iy - 1, iz, Block.Mud);
+        } else w.edit(ix, iy, iz, Block.Dirt);
+      }
+    this.effects.push({ type: 'crater', at: { x: at.x, y: at.y, z: at.z } });
+  }
+
+  private onGroundPound(g: Gorilla, height: number): void {
+    const t = this.ctx.time;
+    const at = { x: g.body.x, y: g.body.y, z: g.body.z };
+    this.effects.push({ type: 'pound', gorilla: g.id, at, height });
+    this.crater(at, Math.min(2.4, 1.2 + height * 0.08));
+    for (const h of this.hunters.values()) {
+      if (h.dead) continue;
+      const dx = h.body.x - at.x, dz = h.body.z - at.z;
+      const d = Math.hypot(dx, dz);
+      if (Math.abs(h.body.y - at.y) > 3) continue;
+      if (d < 3.2) {
+        // Flattened.
+        h.kill(t);
+        this.effects.push({
+          type: 'kill',
+          victim: h.id,
+          killer: g.id,
+          at: { x: h.body.x, y: h.body.y, z: h.body.z },
+          killerAt: at,
+          yaw: Math.atan2(dx, dz),
+          pick: { finisher: LAUNCH_FINISHERS[0], seed: (Math.floor(t * 1000) * 31 + h.id * 7919) >>> 0 },
+          finisher: false,
+          pound: true,
+        });
+        this.round.reportHunterKilled(h.id);
+        this.creditKill(g);
+      } else if (d < 7.5) {
+        // The shockwave knocks the rest flat for a moment.
+        const k = (7.5 - d) / 7.5;
+        h.applyKnockback((dx / d) * 9 * k, 5 * k, (dz / d) * 9 * k);
+        h.stun(0.6 + k * 0.8);
+        if (h.dragging !== null) this.dropBody(h);
+      }
+    }
+  }
+
+  /** Three kills without going down: rage for a while. */
+  private creditKill(g: Gorilla): void {
+    g.streak++;
+    if (g.streak === 3 && !g.lastStand) {
+      g.streakRageUntil = this.ctx.time + 15;
+      this.effects.push({ type: 'streak', gorilla: g.id });
+      this.announce(`${g.name} is on a rampage!`);
+    }
+  }
+
+  private dropBody(h: Hunter): void {
+    h.releaseDrag();
+    h.stun(1.5);
+    this.effects.push({ type: 'chargeDrop', hunter: h.id, at: { x: h.body.x, y: h.body.y + 1, z: h.body.z } });
   }
 
   // ------------------------------------------------------------------ Spawning
 
   private addGorilla(id: number, name: string, at: Vec3): Gorilla {
-    const g = new Gorilla(id, name, at, { swipe: (gg) => this.onSwipe(gg) });
+    const g = new Gorilla(id, name, at, {
+      swipe: (gg) => this.onSwipe(gg),
+      groundPound: (gg, height) => this.onGroundPound(gg, height),
+      smash: (gg) => this.smash(gg),
+    });
     this.gorillas.set(id, g);
     return g;
   }
@@ -173,6 +465,8 @@ export class Match {
       beginDrag: (hh, gid) => this.beginDrag(hh, gid),
       endDrag: (hh) => this.endDrag(hh),
       bind: (_hh, gid) => this.gorillas.get(gid)?.sedation.bind() ?? false,
+      placeNet: (hh) => this.placeNet(hh),
+      fireFlare: (hh) => this.fireFlare(hh),
     });
     this.hunters.set(id, h);
     return h;
@@ -181,6 +475,17 @@ export class Match {
   private gorillaSpawn(index: number): Vec3 {
     const list = this.options.practice ? this.island.practiceGorillas : this.island.gorillaSpawns;
     return list[index % list.length];
+  }
+
+  /** A spawn point, moved inside the fire ring if the fire has reached it. */
+  private safeSpawn(p: Vec3): Vec3 {
+    const fire = this.wildfire;
+    const r0 = this.fireRadius;
+    if (!fire.active || Math.hypot(p.x - fire.center.x, p.z - fire.center.z) < r0 - 6) return p;
+    const r = Math.max(2, r0 * 0.5);
+    const a = Math.atan2(p.z - fire.center.z, p.x - fire.center.x);
+    const x = fire.center.x + Math.cos(a) * r, z = fire.center.z + Math.sin(a) * r;
+    return { x, y: this.ctx.world.groundHeight(x, z) + 0.05, z };
   }
 
   private hunterSpawn(index: number): Vec3 {
@@ -215,12 +520,14 @@ export class Match {
     const radius = reach * 0.6;
 
     let finisherStarted = false;
+    const t0 = this.ctx.time;
     for (const h of this.hunters.values()) {
       if (h.dead) continue;
       const d = Math.hypot(h.body.x - cx, h.body.y + h.body.height / 2 - cy, h.body.z - cz);
       if (d > radius + h.body.halfWidth) continue;
       h.kill(this.ctx.time);
-      let pick = this.finishers.pick(g.id, g.rage);
+      // On a streak, only the big ones.
+      let pick = t0 < g.streakRageUntil ? this.finishers.pickTop(g.id) : this.finishers.pick(g.id, g.rage);
       const forced = LAUNCH_FINISHERS.find((f) => f.id === this.forceFinisher);
       if (forced) pick = { ...pick, finisher: forced };
       // The first victim gets the full finisher: the gorilla turns to face him and is locked in.
@@ -241,6 +548,9 @@ export class Match {
         finisher,
       });
       this.round.reportHunterKilled(h.id);
+      this.creditKill(g);
+      // Slammed into the ground hard enough to dent it.
+      if (pick.finisher.id === 'ragdoll_slam') this.crater({ x: h.body.x, y: h.body.y, z: h.body.z }, 1.3);
     }
     for (const other of this.gorillas.values()) {
       if (other === g || !other.sedation.isDown) continue;
@@ -248,7 +558,13 @@ export class Match {
       if (d > radius + 1.2) continue;
       other.lastSlappedTime = this.ctx.time;
       this.effects.push({ type: 'slap', gorilla: other.id, at: { x: other.body.x, y: other.body.y + 0.6, z: other.body.z } });
-      if (other.sedation.slap() === 'woke') this.onGorillaWoke(other);
+      if (g.wakeRoarReady) {
+        // Once a round: a roar and a slap that brings a teammate straight back up.
+        g.wakeRoarReady = false;
+        other.sedation.wake();
+        this.effects.push({ type: 'wakeRoar', gorilla: g.id, at: { x: other.body.x, y: other.body.y + 1, z: other.body.z } });
+        this.onGorillaWoke(other);
+      } else if (other.sedation.slap() === 'woke') this.onGorillaWoke(other);
     }
   }
 
@@ -259,6 +575,8 @@ export class Match {
     for (const h of this.hunters.values()) {
       if (h.dead) continue;
       const dx = h.body.x - g.body.x, dz = h.body.z - g.body.z;
+      // Charging at a hunter who is dragging a teammate: he drops the body, even on a near miss.
+      if (h.dragging !== null && Math.hypot(dx, dz) < 3.6) this.dropBody(h);
       // A little reach in front so a dash aimed at a hunter connects.
       const ahead = dx * dir.x + dz * dir.z, side = Math.abs(dx * dir.z - dz * dir.x);
       const reach = g.body.halfWidth + h.body.halfWidth;
@@ -278,6 +596,7 @@ export class Match {
         dash: { x: dir.x, z: dir.z },
       });
       this.round.reportHunterKilled(h.id);
+      this.creditKill(g);
     }
   }
 
@@ -344,7 +663,7 @@ export class Match {
         d.y += ny * wt;
         d.z += nz * wt;
         d.stuck = true;
-        d.life = 3;
+        d.life = 25; // stays stuck in the bark for a while
         this.effects.push({ type: 'dartHit', target: null, at: { x: d.x, y: d.y, z: d.z } });
         continue;
       }
